@@ -70,7 +70,8 @@ html body .stApp{background:var(--bg) !important;color:var(--text) !important;fo
 html body .stApp [data-testid="stAppViewContainer"],html body .stApp [data-testid="stMain"]{background:transparent !important}
 html body .stApp [data-testid="stHeader"]{background:transparent !important}
 html,body{overflow-x:hidden !important;max-width:100vw !important}
-#MainMenu,footer,[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{visibility:hidden !important}
+#MainMenu,footer,[data-testid="stDecoration"],[data-testid="stStatusWidget"],[data-testid="stAppDeployButton"]{visibility:hidden !important}
+[data-testid="stSidebarCollapsedControl"],[data-testid="stExpandSidebarButton"],[data-testid="stSidebarCollapseButton"]{visibility:visible !important;display:flex !important}
 [data-stale="true"]{opacity:1 !important;transition:none !important}
 .stApp .block-container{padding:2rem 1.35rem 3rem !important;max-width:1500px}
 .stApp :is(p,li,h1,h2,h3,h4,h5,h6){color:var(--text)}
@@ -107,26 +108,11 @@ body [data-baseweb="popover"] li:hover,body [data-baseweb="popover"] [role="opti
 .stApp .st-key-theme_row{display:flex;justify-content:flex-end}
 .stApp .st-key-theme_row [data-testid="stToggle"]{padding:6px 12px;border:1px solid var(--line-strong);border-radius:999px;background:var(--panel)}
 /* ---------- top banner ---------- */
-.topbar-shell{position:relative;overflow:hidden;isolation:isolate;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px 28px;padding:20px 26px 18px;margin:4px 0 18px;border:1px solid transparent;border-radius:14px;
-background:radial-gradient(70% 140% at 100% 0%,color-mix(in srgb,#4c8dff 11%,transparent),transparent 62%) padding-box,linear-gradient(180deg,var(--glass-a),var(--glass-b)) padding-box,linear-gradient(135deg,color-mix(in srgb,#4c8dff 60%,transparent),var(--line) 34%,var(--line) 66%,color-mix(in srgb,#e0708c 50%,transparent)) border-box;box-shadow:var(--shadow)}
-.topbar-shell::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,#3b82f6,#8b5cf6 28%,#db2777 55%,#f59e0b 78%,#14b8a6);opacity:.9}
-.topbar-shell::after{content:"";position:absolute;inset:0;z-index:-1;background-image:radial-gradient(var(--dot) 1px,transparent 1.2px);background-size:14px 14px;-webkit-mask-image:linear-gradient(90deg,transparent 38%,#000);mask-image:linear-gradient(90deg,transparent 38%,#000);opacity:.5}
-.topbar-brand{display:flex;align-items:center;gap:16px;min-width:0;flex:1 1 420px}
-.topbar-logo{width:46px;height:46px;flex:0 0 46px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:22px;background:var(--panel-3);border:1px solid var(--line-strong)}
-.topbar-kicker{display:flex;align-items:center;gap:10px;margin-bottom:7px;font:700 10.5px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
-.topbar-kicker .tb-brand{background:linear-gradient(90deg,#4c8dff,#a78bfa);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.topbar-kicker .tb-sep{width:18px;height:1px;background:currentColor;opacity:.45}
-.topbar-title{font-size:21px;font-weight:750;letter-spacing:-.012em;color:var(--text)}
-.topbar-status-wrap{display:flex;align-items:center;gap:10px}
-.topbar-chip{display:flex;align-items:center;gap:9px;padding:7px 13px;border-radius:10px;font:600 11.5px/1 Inter,sans-serif;white-space:nowrap;color:var(--text);background:var(--panel-3);border:1px solid var(--line-strong)}
-.topbar-chip.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent);background:color-mix(in srgb,var(--ok) 9%,transparent)}
-.topbar-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent);animation:tbDot 2.6s ease-in-out infinite}
-@keyframes tbDot{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--ok) 6%,transparent)}}
-.topbar-subtitle{order:3;flex:1 1 100%;display:flex;flex-wrap:wrap;gap:6px 22px;padding-top:12px;margin:0;background:linear-gradient(90deg,var(--line-strong),transparent 85%) top left/100% 1px no-repeat;font-size:11.5px;color:var(--muted)}
-.tb-tag{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;--tc:#4c8dff}
-.tb-tag::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--tc);box-shadow:0 0 0 3px color-mix(in srgb,var(--tc) 24%,transparent)}
-.tb-tag:nth-child(2){--tc:#8b7cf6}.tb-tag:nth-child(3){--tc:#38b2a3}.tb-tag:nth-child(4){--tc:#e0a050}.tb-tag:nth-child(5){--tc:#e0708c}.tb-tag:nth-child(6){--tc:#8fa1b6}
-@media(max-width:640px){.topbar-subtitle{display:none}.topbar-title{font-size:17px}.topbar-status-wrap{width:100%}}
+.hdr{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 20px;padding:2px 0 10px 14px;margin:0 0 14px;border-left:3px solid var(--tone);border-bottom:1px solid var(--line)}
+.hdr h1{margin:0;padding:0;font-size:20px;font-weight:700;letter-spacing:-.01em;color:var(--text)}
+.hdr-meta{font:500 12px/1.4 ui-monospace,monospace;color:var(--muted)}
+.hdr-meta b{color:var(--ok);font-weight:600}
+@media(max-width:640px){.hdr h1{font-size:16px}}
 /* ---------- capsule nav ---------- */
 .stApp .st-key-topnav{position:relative;margin:38px 0 14px !important;padding:0 !important;border-radius:32px;border:1px solid var(--line-strong);background:linear-gradient(180deg,var(--glass-a),var(--glass-b));box-shadow:var(--shadow)}
 .stApp .st-key-topnav [data-testid="stWidgetLabel"]{display:none !important}
@@ -403,12 +389,7 @@ with st.sidebar:
 
 # ====================== top banner + nav ======================
 st.markdown(
-    f"""<div class="topbar-shell"><div class="topbar-brand"><div class="topbar-logo">❄️</div><div>
-<div class="topbar-kicker"><span class="tb-brand">POLAR EMS</span><span class="tb-sep"></span><span>SIH 2026 · SIH26061</span></div>
-<div class="topbar-title">Research-Station Energy Operations</div></div></div>
-<div class="topbar-status-wrap"><div class="topbar-chip">{C.LATITUDE_DEG:.0f}° latitude · {C.SIM_YEAR}</div>
-<div class="topbar-chip ok"><span class="topbar-dot"></span>Simulation online</div></div>
-<div class="topbar-subtitle"><span class="tb-tag">Load forecasting</span><span class="tb-tag">LP dispatch</span><span class="tb-tag">Renewable integration</span><span class="tb-tag">Battery health</span><span class="tb-tag">Stress testing</span><span class="tb-tag">Run provenance</span></div></div>""",
+    f"""<div class="hdr"><h1>❄️ Polar EMS · Research-Station Energy</h1><div class="hdr-meta">{C.LATITUDE_DEG:.0f}° lat · {C.SIM_YEAR} · <b>sim online</b></div></div>""",
     unsafe_allow_html=True)
 
 with st.container(key="topnav"):
