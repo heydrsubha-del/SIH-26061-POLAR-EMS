@@ -18,100 +18,66 @@ from health import runtime_diagnostics, configuration_diagnostics
 
 st.set_page_config(page_title="POLAR EMS | Energy Operations", page_icon="❄️", layout="wide", initial_sidebar_state="expanded")
 
-# ---------- Visual system / user-controlled theme ----------
-if "polar_theme_dark" not in st.session_state:
-    st.session_state.polar_theme_dark = False
-
-# This control lives in the main page, so it remains available even when the
-# Streamlit sidebar is collapsed.
-mode_col, mode_spacer = st.columns([1, 5])
-with mode_col:
+# ---------- Theme ----------
+st.session_state.setdefault("polar_theme_dark", False)
+head_l, head_r = st.columns([6, 1.3])
+with head_r:
     dark_mode = st.toggle("Dark mode", key="polar_theme_dark")
 
-BG = "#0B0D10" if dark_mode else "#FFFFFF"
-PANEL = "#12161C" if dark_mode else "#FFFFFF"
-PANEL_2 = "#171C23" if dark_mode else "#FAFAFA"
-TEXT = "#F3F5F7" if dark_mode else "#171717"
-MUTED = "#9BA6B2" if dark_mode else "#737373"
-CYAN = "#42D5F5" if dark_mode else "#0070F3"
-BLUE = "#4DA3FF" if dark_mode else "#0070F3"
-GREEN = "#3DDC97" if dark_mode else "#00A884"
-AMBER = "#FFBD4A" if dark_mode else "#F5A623"
-RED = "#FF5B65" if dark_mode else "#EE0000"
-BORDER = "#29313B" if dark_mode else "#EBEBEB"
-GRID = "#242B34" if dark_mode else "#F0F0F0"
+if dark_mode:
+    BG, PANEL, PANEL_2, TEXT, MUTED = "#0A0C10", "#11151B", "#161B22", "#F2F4F7", "#8B96A3"
+    BLUE, GREEN, AMBER, RED, SOLAR = "#4DA3FF", "#3DDC97", "#FFBD4A", "#FF5B65", "#F4C75A"
+    BORDER, GRID, CHIP_BG, CHIP_FG = "#262D37", "#1E252E", "#12263B", "#8CC4FF"
+else:
+    BG, PANEL, PANEL_2, TEXT, MUTED = "#FFFFFF", "#FFFFFF", "#FAFAFA", "#171717", "#6B7280"
+    BLUE, GREEN, AMBER, RED, SOLAR = "#0070F3", "#00A884", "#D98200", "#E5484D", "#E5A800"
+    BORDER, GRID, CHIP_BG, CHIP_FG = "#EAEAEA", "#F1F1F1", "#F0F7FF", "#0060D0"
+CYAN = BLUE
 
 st.markdown(f"""<style>
-:root {{ color-scheme: {'dark' if dark_mode else 'light'}; }}
+:root {{ color-scheme:{'dark' if dark_mode else 'light'}; }}
 html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], [data-testid="stMain"] {{ background:{BG} !important; color:{TEXT} !important; }}
-[data-testid="stMainBlockContainer"] {{ background:transparent !important; }}
-[data-testid="stVerticalBlock"] {{ color:{TEXT}; }}
-[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li {{ color:{TEXT}; }}
-[data-testid="stWidgetLabel"] p, label {{ color:{MUTED} !important; }}
-input, textarea, [data-baseweb="input"] > div {{ background:{PANEL} !important; color:{TEXT} !important; border-color:{BORDER} !important; }}
-/* Streamlit/BaseWeb select controls: explicitly theme every nested surface. */
-[data-testid="stSelectbox"] [data-baseweb="select"] > div,
-[data-testid="stMultiSelect"] [data-baseweb="select"] > div,
-[data-baseweb="select"] > div {{ background:{PANEL} !important; color:{TEXT} !important; border-color:{BORDER} !important; box-shadow:none !important; }}
-[data-testid="stSelectbox"] [data-baseweb="select"] span,
-[data-testid="stMultiSelect"] [data-baseweb="select"] span,
-[data-baseweb="select"] span {{ color:{TEXT} !important; }}
-[data-baseweb="popover"] [role="listbox"], [data-baseweb="popover"] ul {{ background:{PANEL} !important; color:{TEXT} !important; }}
-[data-baseweb="popover"] [role="option"], [data-baseweb="popover"] li {{ color:{TEXT} !important; background:{PANEL} !important; }}
-[data-baseweb="popover"] [role="option"]:hover, [data-baseweb="popover"] li:hover {{ background:{PANEL_2} !important; }}
-/* Metric delta chips were inheriting the dark default theme in light mode. */
-[data-testid="stMetricDelta"] {{ background:{'#12352B' if dark_mode else '#E8F7F1'} !important; color:{'#8BE6BD' if dark_mode else '#087653'} !important; border-radius:999px; padding:2px 8px; width:fit-content; }}
-[data-testid="stMetricDelta"] *, [data-testid="stMetricDelta"] svg {{ color:{'#8BE6BD' if dark_mode else '#087653'} !important; fill:{'#8BE6BD' if dark_mode else '#087653'} !important; }}
-[data-testid="stSidebar"] [data-testid="stSidebarContent"] {{ background:{PANEL_2}; }}
-[data-testid="stSidebarCollapseButton"], [data-testid="stSidebarExpandButton"] {{
-  border:1px solid {BORDER} !important; border-radius:8px !important; background:{PANEL} !important;
-  color:{CYAN} !important; min-width:34px !important; min-height:34px !important;
-  box-shadow:none !important; transition:background .15s ease, border-color .15s ease;
-}}
-[data-testid="stSidebarCollapseButton"]:hover, [data-testid="stSidebarExpandButton"]:hover {{
-  background:{PANEL_2} !important; border-color:{CYAN} !important;
-}}
-[data-testid="stSidebarCollapseButton"] svg, [data-testid="stSidebarExpandButton"] svg {{ width:18px !important; height:18px !important; }}
-[data-testid="stToggle"] {{ color:{TEXT}; }}
-[data-testid="stToggle"] [role="switch"] {{ border-color:{BORDER} !important; }}
-[data-testid="stToggle"] [role="switch"][aria-checked="true"] {{ background:{CYAN} !important; }}
 [data-testid="stHeader"] {{ background:transparent; }}
-[data-testid="stSidebar"] {{ background:{PANEL_2}; border-right:1px solid {BORDER}; min-width:245px; }}
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"] {{ visibility:hidden; }}
+[data-stale="true"] {{ opacity:1 !important; transition:none !important; }}
+.block-container {{ padding-top:1.4rem; padding-bottom:2.5rem; max-width:1500px; }}
+[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li {{ color:{TEXT}; }}
+[data-testid="stWidgetLabel"] p, label {{ color:{MUTED} !important; font-size:.8rem; }}
+h1,h2,h3 {{ letter-spacing:-.03em; color:{TEXT}; font-weight:600; }}
+input, textarea, [data-baseweb="input"] > div, [data-baseweb="select"] > div {{ background:{PANEL} !important; color:{TEXT} !important; border-color:{BORDER} !important; box-shadow:none !important; }}
+[data-baseweb="select"] span {{ color:{TEXT} !important; }}
+[data-baseweb="popover"] ul, [data-baseweb="popover"] [role="listbox"] {{ background:{PANEL} !important; }}
+[data-baseweb="popover"] li, [data-baseweb="popover"] [role="option"] {{ background:{PANEL} !important; color:{TEXT} !important; }}
+[data-baseweb="popover"] li:hover, [data-baseweb="popover"] [role="option"]:hover {{ background:{PANEL_2} !important; }}
+[data-testid="stVerticalBlockBorderWrapper"] {{ border-color:{BORDER} !important; border-radius:10px; background:{PANEL}; }}
+[data-testid="stToggle"] [role="switch"][aria-checked="true"] {{ background:{BLUE} !important; }}
+[data-testid="stSidebar"], [data-testid="stSidebar"] [data-testid="stSidebarContent"] {{ background:{PANEL_2}; border-right:1px solid {BORDER}; }}
 [data-testid="stSidebar"] * {{ color:{TEXT}; }}
-.block-container {{ padding-top:1.25rem; padding-bottom:2.5rem; max-width:1500px; }}
-h1,h2,h3 {{ letter-spacing:-.035em; color:{TEXT}; font-weight:600; }}
-h1 {{ font-size:2.1rem !important; }}
-[data-testid="stMetric"] {{ background:{PANEL}; border:1px solid {BORDER}; padding:16px 18px; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,.025); }}
-[data-testid="stMetricLabel"] {{ color:{MUTED} !important; font-size:.78rem !important; letter-spacing:.02em; }}
-[data-testid="stMetricValue"] {{ color:{TEXT} !important; font-weight:650; }}
-[data-testid="stMetricDelta"] {{ font-size:.78rem; }}
-[data-testid="stTabs"] button {{ color:{MUTED}; font-size:.82rem; }}
-[data-testid="stTabs"] button[aria-selected="true"] {{ color:{CYAN}; border-bottom-color:{CYAN}; }}
-[data-testid="stPlotlyChart"] {{ border:1px solid {BORDER}; border-radius:8px; overflow:hidden; background:{PANEL}; }}
-[data-testid="stExpander"] {{ border:1px solid {BORDER}; border-radius:8px; background:{PANEL}; }}
-[data-testid="stSelectbox"] label,[data-testid="stSlider"] label {{ color:{MUTED}; }}
+[data-testid="stTabs"] button {{ color:{MUTED}; font-size:.8rem; letter-spacing:.04em; }}
+[data-testid="stTabs"] button[aria-selected="true"] {{ color:{TEXT}; }}
+[data-testid="stPlotlyChart"], [data-testid="stDataFrame"], [data-testid="stExpander"] {{ border:1px solid {BORDER}; border-radius:10px; overflow:hidden; background:{PANEL}; }}
+button, [data-testid="stDownloadButton"] button {{ border-radius:8px !important; }}
 hr {{ border-color:{BORDER}; }}
-.smallcaps {{ color:{MUTED}; font-size:10px; letter-spacing:1.5px; font-weight:650; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }}
-.hero {{ padding:24px 26px; border:1px solid {BORDER}; border-radius:10px; background:linear-gradient(115deg,{PANEL_2} 0%,{BG} 65%,{'#12243B' if dark_mode else '#F4F8FF'} 100%); margin-bottom:18px; position:relative; overflow:hidden; }}
-.hero:after {{ content:""; position:absolute; right:-110px; top:-120px; width:330px; height:260px; background:radial-gradient(ellipse at center,rgba(0,112,243,.12),rgba(80,227,194,.09),rgba(255,0,128,.035),transparent 72%); pointer-events:none; }}
-.hero-title {{ font-size:25px; font-weight:650; letter-spacing:-.9px; color:{TEXT}; }}
-.hero-sub {{ color:{MUTED}; font-size:13px; margin-top:5px; }}
-.status-pill {{ display:inline-block; padding:5px 10px; border-radius:6px; background:{'#14263B' if dark_mode else '#F0F7FF'}; color:{CYAN}; border:1px solid {'#254C70' if dark_mode else '#D3E5FF'}; font-size:10px; font-weight:650; letter-spacing:.6px; }}
-.flow-wrap {{ display:flex; gap:8px; align-items:stretch; justify-content:space-between; flex-wrap:wrap; padding:10px 0 4px; }}
-.flow-card {{ flex:1; min-width:132px; background:{PANEL}; border:1px solid {BORDER}; border-radius:8px; padding:14px 15px; }}
-.flow-card .label {{ font-size:10px; color:{MUTED}; letter-spacing:1px; text-transform:uppercase; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }}
-.flow-card .value {{ font-size:21px; font-weight:650; margin-top:7px; color:{TEXT}; letter-spacing:-.5px; }}
-.flow-card .foot {{ font-size:11px; color:{MUTED}; margin-top:4px; }}
-.flow-arrow {{ align-self:center; color:{CYAN}; font-size:18px; font-weight:700; padding:0 1px; }}
-.section-head {{ display:flex; align-items:center; gap:9px; margin:5px 0 11px; }}
-.section-dot {{ width:6px; height:6px; border-radius:50%; background:{CYAN}; }}
-button, [data-testid="stDownloadButton"] button {{ border-radius:6px !important; }}
-[data-testid="stDataFrame"] {{ border:1px solid {BORDER}; border-radius:8px; }}
-/* Stable, polished sidebar; controls stay reachable in expanded/collapsed states. */
-[data-testid="stSidebar"] {{ transition: width .18s ease; overflow-x:hidden; }}
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {{ overflow-wrap:anywhere; }}
-[data-testid="stSidebar"] hr {{ opacity:.6; }}
+.smallcaps, .eyebrow {{ color:{MUTED}; font-size:10px; letter-spacing:1.5px; font-weight:650; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }}
+.hdr-t {{ font-size:26px; font-weight:650; letter-spacing:-.9px; color:{TEXT}; margin-top:4px; }}
+.hdr-t span {{ color:{MUTED}; font-weight:500; }}
+.hdr-s {{ color:{MUTED}; font-size:13px; margin-top:4px; }}
+.chips {{ display:flex; gap:6px; flex-wrap:wrap; }}
+.chip {{ display:inline-block; padding:4px 9px; border-radius:6px; background:{CHIP_BG}; color:{CHIP_FG}; border:1px solid {BORDER}; font-size:10px; font-weight:650; letter-spacing:.6px; }}
+.kpi-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin:14px 0 18px; }}
+.kpi, .flow-card {{ background:{PANEL}; border:1px solid {BORDER}; border-radius:10px; padding:15px 17px; }}
+.kpi-l, .flow-card .label {{ font-size:11px; color:{MUTED}; letter-spacing:.8px; text-transform:uppercase; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }}
+.kpi-v, .flow-card .value {{ font-size:26px; font-weight:650; margin-top:8px; color:{TEXT}; letter-spacing:-.6px; line-height:1.1; }}
+.flow-card .value {{ font-size:21px; }}
+.kpi-f, .flow-card .foot {{ font-size:12px; color:{MUTED}; margin-top:6px; }}
+.flow-wrap {{ display:flex; gap:8px; align-items:stretch; flex-wrap:wrap; padding:6px 0 4px; }}
+.flow-wrap .flow-card {{ flex:1; min-width:150px; }}
+.flow-arrow {{ align-self:center; color:{MUTED}; font-size:18px; }}
+.section-head {{ display:flex; align-items:center; gap:9px; margin:8px 0 10px; }}
+.section-dot {{ width:6px; height:6px; border-radius:50%; background:{BLUE}; }}
 </style>""", unsafe_allow_html=True)
+
+head_l.markdown(f"<div class='eyebrow'>ENERGY OPERATIONS CENTRE · {C.SIM_YEAR}</div><div class='hdr-t'>Polar EMS <span>Energy Operations</span></div><div class='hdr-s'>Research-station microgrid · forecast-led dispatch · renewable integration</div><div class='chips' style='margin-top:10px'><span class='chip'>● SIMULATION ONLINE</span></div>", unsafe_allow_html=True)
 
 
 @st.cache_data(show_spinner="Generating the polar station simulation…")
@@ -138,8 +104,10 @@ def co2(kwh):
 
 def chart_layout(fig, height=330, legend=True):
     fig.update_layout(
-        height=height, paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT, size=11),
-        margin=dict(l=18, r=18, t=36, b=24), hovermode="x unified",
+        height=height, paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT, size=12),
+        title_font=dict(size=13, color=TEXT), title_x=0.01,
+        hoverlabel=dict(bgcolor=PANEL_2, bordercolor=BORDER, font_color=TEXT),
+        margin=dict(l=18, r=18, t=44, b=24), hovermode="x unified",
         legend=dict(orientation="h", y=-0.18, x=0, bgcolor="rgba(0,0,0,0)") if legend else dict(visible=False),
         xaxis=dict(gridcolor=GRID, zerolinecolor=BORDER, showline=False),
         yaxis=dict(gridcolor=GRID, zerolinecolor=BORDER, showline=False),
@@ -175,10 +143,11 @@ with st.sidebar:
     st.caption("DEMO MODE · Deterministic simulation")
     st.caption("No live station telemetry")
 
-control_scenario, control_days, control_note = st.columns([2.2, 1.2, 2.2])
-scenario = control_scenario.selectbox("Operating scenario", list(scenarios), index=0, key="main_scenario")
-days = control_days.slider("Dispatch window", min_value=2, max_value=14, value=7, step=1, format="%d days", key="main_days")
-control_note.markdown(f"<div style='padding-top:27px;color:{MUTED};font-size:12px'>WINDOW · {days} DAYS &nbsp;|&nbsp; SIMULATED DATA</div>", unsafe_allow_html=True)
+with st.container(border=True):
+    control_scenario, control_days, control_note = st.columns([2.2, 1.4, 1.6])
+    scenario = control_scenario.selectbox("Operating scenario", list(scenarios), key="main_scenario")
+    days = control_days.slider("Dispatch window", 2, 14, 7, 1, format="%d days", key="main_days")
+    control_note.markdown(f"<div class='chips' style='padding-top:28px'><span class='chip'>{days} DAYS</span><span class='chip'>SIMULATED DATA</span></div>", unsafe_allow_html=True)
 
 start = int(df.index.get_loc(scenarios[scenario]))
 disp, solver_status = get_dispatch(start, days * 24)
@@ -200,29 +169,19 @@ peak_load = ops.peak_load_kw
 soc_now = ops.ending_soc_kwh
 soc_pct = ops.ending_soc_pct
 
-# ---------- Sidebar-independent header ----------
-st.markdown(f"""<div class="hero"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-<div><div class="smallcaps">ENERGY OPERATIONS CENTRE · {C.SIM_YEAR}</div><div class="hero-title">Polar EMS · Energy Operations</div><div class="hero-sub">Research-station microgrid · forecast-led dispatch · renewable integration</div></div>
-<div><span class="status-pill">● SIMULATION ONLINE</span></div></div>""", unsafe_allow_html=True)
+def kpi(label, value, foot):
+    return f"<div class='kpi'><div class='kpi-l'>{label}</div><div class='kpi-v'>{value}</div><div class='kpi-f'>{foot}</div></div>"
 
-# Top metrics
-m1, m2, m3, m4, m5 = st.columns(5)
-m1.metric("Station demand", f"{avg_load:.1f} kW", f"Peak {peak_load:.1f} kW")
-m2.metric("Diesel consumed", f"{litres(diesel_kwh):,.0f} L", f"{diesel_kwh:,.0f} kWh in window")
-m3.metric("Renewable contribution", f"{renew_share:.1f}%", f"{renewable_kwh:,.0f} kWh supplied")
-m4.metric("Fuel avoided", f"{litres(saved_kwh):,.0f} L", f"{(saved_kwh/base_kwh*100 if base_kwh else 0):.1f}% vs baseline")
-m5.metric("Battery reserve", f"{soc_pct:.0f}%", f"{soc_now:.0f} / {C.BATTERY_CAPACITY_KWH:.0f} kWh")
+st.markdown("<div class='kpi-grid'>" + "".join([
+    kpi("Station demand", f"{avg_load:.1f} kW", f"Peak {peak_load:.1f} kW"),
+    kpi("Diesel consumed", f"{litres(diesel_kwh):,.0f} L", f"{diesel_kwh:,.0f} kWh in window"),
+    kpi("Renewable contribution", f"{renew_share:.1f}%", f"{renewable_kwh:,.0f} kWh supplied"),
+    kpi("Fuel avoided", f"{litres(saved_kwh):,.0f} L", f"{(saved_kwh/base_kwh*100 if base_kwh else 0):.1f}% vs baseline"),
+    kpi("Battery reserve", f"{soc_pct:.0f}%", f"{soc_now:.0f} / {C.BATTERY_CAPACITY_KWH:.0f} kWh"),
+]) + "</div>", unsafe_allow_html=True)
 
-# Alerts are deterministic and derived by the same validated operations service
-# used by the downloadable operations report.
 alerts = operational_alerts
-
-# Contextual operating condition, from actual selected scenario.
-enewable_available_mean = float((disp.solar_avail + disp.wind_avail).mean())
-diesel_hours = int((disp.diesel_kw > 0.1).sum())
-low_soc = bool((disp.soc_kwh <= C.BATTERY_MIN_SOC_FRAC * C.BATTERY_CAPACITY_KWH + 1).any())
-# Keep alerts in the validated, structured format shared by UI and report.
-alerts = operational_alerts
+diesel_hours = ops.diesel_active_hours
 
 # Main app navigation
 nav = st.tabs(["OVERVIEW", "FORECAST", "DISPATCH", "ASSETS & ALERTS", "MODEL NOTES"])
@@ -260,7 +219,7 @@ with nav[0]:
         st.plotly_chart(chart_layout(fig, 350), use_container_width=True)
     with right:
         section("BATTERY RESERVE")
-        fig_soc = go.Figure(go.Indicator(mode="gauge+number", value=soc_pct, number={"suffix":"%", "font":{"color":TEXT,"size":34}}, gauge={"axis":{"range":[0,100],"tickcolor":MUTED},"bar":{"color":GREEN},"bgcolor":PANEL,"bordercolor":BORDER,"steps":[{"range":[0,C.BATTERY_MIN_SOC_FRAC*100],"color":"#F7D4D6"},{"range":[C.BATTERY_MIN_SOC_FRAC*100,100],"color":PANEL_2}],"threshold":{"line":{"color":AMBER,"width":3},"thickness":0.8,"value":C.BATTERY_MIN_SOC_FRAC*100}}))
+        fig_soc = go.Figure(go.Indicator(mode="gauge+number", value=soc_pct, number={"suffix":"%", "font":{"color":TEXT,"size":34}}, gauge={"axis":{"range":[0,100],"tickcolor":MUTED},"bar":{"color":GREEN},"bgcolor":PANEL,"bordercolor":BORDER,"steps":[{"range":[0,C.BATTERY_MIN_SOC_FRAC*100],"color":"rgba(229,72,77,.22)"},{"range":[C.BATTERY_MIN_SOC_FRAC*100,100],"color":PANEL_2}],"threshold":{"line":{"color":AMBER,"width":3},"thickness":0.8,"value":C.BATTERY_MIN_SOC_FRAC*100}}))
         fig_soc.update_layout(height=260, paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT), margin=dict(t=20,b=15,l=10,r=10))
         st.plotly_chart(fig_soc, use_container_width=True)
         st.caption(f"Minimum reserve: {C.BATTERY_MIN_SOC_FRAC*100:.0f}% · Capacity: {C.BATTERY_CAPACITY_KWH:.0f} kWh")
@@ -365,4 +324,4 @@ with nav[4]:
         st.code("config.py → data_sim.py → forecast.py → optimizer.py → app.py", language="text")
         st.caption("Synthetic data generation · ML forecast · fuel-minimising dispatch · operations dashboard")
 
-st.markdown("<div style='text-align:center;color:#60788B;font-size:11px;padding-top:16px'>POLAR EMS · SIH 2026 · SIH26061 · SIMULATION ENVIRONMENT</div>", unsafe_allow_html=True)
+st.markdown(f"<div style='text-align:center;color:{MUTED};font-size:11px;padding-top:16px'>POLAR EMS · SIH 2026 · SIH26061 · SIMULATION ENVIRONMENT</div>", unsafe_allow_html=True)
