@@ -203,15 +203,16 @@ m5.metric("Battery reserve", f"{soc_pct:.0f}%", f"{soc_now:.0f} / {C.BATTERY_CAP
 enewable_available_mean = float((disp.solar_avail + disp.wind_avail).mean())
 diesel_hours = int((disp.diesel_kw > 0.1).sum())
 low_soc = bool((disp.soc_kwh <= C.BATTERY_MIN_SOC_FRAC * C.BATTERY_CAPACITY_KWH + 1).any())
-alerts = []
+# Keep a single normalized alert schema for the dashboard and report exporter.
+alerts: list[dict[str, str]] = []
 if renew_share < 30:
-    alerts.append(("WATCH", "Low renewable contribution", f"Renewables supplied {renew_share:.1f}% of selected-window demand."))
+    alerts.append({"severity": "warning", "code": "LOW_RENEWABLE", "title": "Low renewable contribution", "detail": f"Renewables supplied {renew_share:.1f}% of selected-window demand."})
 if low_soc:
-    alerts.append(("WATCH", "Battery reserve touched", "The dispatch reached the configured minimum state-of-charge threshold."))
+    alerts.append({"severity": "warning", "code": "BATTERY_RESERVE", "title": "Battery reserve touched", "detail": "The dispatch reached the configured minimum state-of-charge threshold."})
 if diesel_hours:
-    alerts.append(("INFO", "Backup generation used", f"Diesel was active for {diesel_hours} of {len(disp)} simulated hours."))
+    alerts.append({"severity": "info", "code": "DIESEL_ACTIVE", "title": "Backup generation used", "detail": f"Diesel was active for {diesel_hours} of {len(disp)} simulated hours."})
 if not alerts:
-    alerts.append(("OK", "No operating alerts", "Selected dispatch window remained within configured battery reserve."))
+    alerts.append({"severity": "success", "code": "NORMAL_OPERATION", "title": "No operating alerts", "detail": "Selected dispatch window remained within configured battery reserve."})
 
 # Main app navigation
 nav = st.tabs(["OVERVIEW", "FORECAST", "DISPATCH", "ASSETS & ALERTS", "MODEL NOTES", "INTELLIGENCE"])
@@ -322,8 +323,14 @@ with nav[3]:
             st.markdown(f"<div class='flow-card' style='margin-bottom:12px'><div class='label'>{category}</div><div class='value' style='color:{color}'>{capacity}</div><div style='font-weight:650;margin-top:6px'>{name}</div><div class='foot'>{detail_text}</div></div>", unsafe_allow_html=True)
     section("OPERATIONS / ALERT LOG")
     for alert in alerts:
-        color = {"success": GREEN, "info": BLUE, "warning": AMBER, "notice": RED}.get(alert["severity"], MUTED)
-        st.markdown(f"<div class='flow-card' style='margin-bottom:8px;border-left:3px solid {color}'><div class='label' style='color:{color}'>{alert['severity'].upper()} · {alert['code']}</div><div style='font-weight:650;margin:5px 0'>{alert['title']}</div><div class='foot'>{alert['detail']}</div></div>", unsafe_allow_html=True)
+        # Defensive rendering: malformed or incomplete alerts must never crash the UI.
+        severity = alert.get("severity", "notice") if isinstance(alert, dict) else "notice"
+        severity = severity.lower() if isinstance(severity, str) else "notice"
+        code = alert.get("code", "GENERAL") if isinstance(alert, dict) else "GENERAL"
+        title = alert.get("title", "Operating alert") if isinstance(alert, dict) else "Operating alert"
+        detail = alert.get("detail", "No details provided.") if isinstance(alert, dict) else str(alert)
+        color = {"success": GREEN, "info": BLUE, "warning": AMBER, "notice": RED}.get(severity, MUTED)
+        st.markdown(f"<div class='flow-card' style='margin-bottom:8px;border-left:3px solid {color}'><div class='label' style='color:{color}'>{severity.upper()} · {code}</div><div style='font-weight:650;margin:5px 0'>{title}</div><div class='foot'>{detail}</div></div>", unsafe_allow_html=True)
     st.caption("Alerts are generated from the selected simulation window; they are not real station alarms.")
     report_md = export_report(ops, alerts, run_manifest)
     st.download_button("Download operations report (Markdown)", report_md, file_name="polar_ems_operations_report.md", mime="text/markdown")
