@@ -14,8 +14,6 @@ from forecast import forecast_load
 from optimizer import optimize_dispatch, baseline_diesel
 from ems_core import calculate_metrics, build_operational_alerts, build_run_manifest, export_report
 from health import runtime_diagnostics, configuration_diagnostics
-from smart_ops import (battery_health, maintenance_signals, run_stress_scenario,
-                      forecast_aware_dispatch, build_run_summary, load_history, save_history_run)
 
 
 st.set_page_config(page_title="POLAR EMS | Energy Operations", page_icon="❄️", layout="wide", initial_sidebar_state="expanded")
@@ -45,7 +43,25 @@ GRID = "#242B34" if dark_mode else "#F0F0F0"
 
 st.markdown(f"""<style>
 :root {{ color-scheme: {'dark' if dark_mode else 'light'}; }}
-html, body, [data-testid="stAppViewContainer"] {{ background:{BG}; color:{TEXT}; }}
+html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], [data-testid="stMain"] {{ background:{BG} !important; color:{TEXT} !important; }}
+[data-testid="stMainBlockContainer"] {{ background:transparent !important; }}
+[data-testid="stVerticalBlock"] {{ color:{TEXT}; }}
+[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li {{ color:{TEXT}; }}
+[data-testid="stWidgetLabel"] p, label {{ color:{MUTED} !important; }}
+input, textarea, [data-baseweb="select"] > div, [data-baseweb="input"] > div {{ background:{PANEL}; color:{TEXT}; border-color:{BORDER} !important; }}
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] {{ background:{PANEL_2}; }}
+[data-testid="stSidebarCollapseButton"], [data-testid="stSidebarExpandButton"] {{
+  border:1px solid {BORDER} !important; border-radius:8px !important; background:{PANEL} !important;
+  color:{CYAN} !important; min-width:34px !important; min-height:34px !important;
+  box-shadow:none !important; transition:background .15s ease, border-color .15s ease;
+}}
+[data-testid="stSidebarCollapseButton"]:hover, [data-testid="stSidebarExpandButton"]:hover {{
+  background:{PANEL_2} !important; border-color:{CYAN} !important;
+}}
+[data-testid="stSidebarCollapseButton"] svg, [data-testid="stSidebarExpandButton"] svg {{ width:18px !important; height:18px !important; }}
+[data-testid="stToggle"] {{ color:{TEXT}; }}
+[data-testid="stToggle"] [role="switch"] {{ border-color:{BORDER} !important; }}
+[data-testid="stToggle"] [role="switch"][aria-checked="true"] {{ background:{CYAN} !important; }}
 [data-testid="stHeader"] {{ background:transparent; }}
 [data-testid="stSidebar"] {{ background:{PANEL_2}; border-right:1px solid {BORDER}; min-width:245px; }}
 [data-testid="stSidebar"] * {{ color:{TEXT}; }}
@@ -78,8 +94,10 @@ hr {{ border-color:{BORDER}; }}
 .section-dot {{ width:6px; height:6px; border-radius:50%; background:{CYAN}; }}
 button, [data-testid="stDownloadButton"] button {{ border-radius:6px !important; }}
 [data-testid="stDataFrame"] {{ border:1px solid {BORDER}; border-radius:8px; }}
-/* The sidebar is optional utility space: primary controls and navigation remain in main canvas. */
-[data-testid="stSidebar"] {{ transition: width .18s ease; }}
+/* Stable, polished sidebar; controls stay reachable in expanded/collapsed states. */
+[data-testid="stSidebar"] {{ transition: width .18s ease; overflow-x:hidden; }}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {{ overflow-wrap:anywhere; }}
+[data-testid="stSidebar"] hr {{ opacity:.6; }}
 </style>""", unsafe_allow_html=True)
 
 
@@ -186,36 +204,15 @@ m5.metric("Battery reserve", f"{soc_pct:.0f}%", f"{soc_now:.0f} / {C.BATTERY_CAP
 # used by the downloadable operations report.
 alerts = operational_alerts
 
-# ---------- Sidebar-independent header ----------
-st.markdown(f"""<div class="hero"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-<div><div class="smallcaps">ENERGY OPERATIONS CENTRE · {C.SIM_YEAR}</div><div class="hero-title">Polar EMS · Energy Operations</div><div class="hero-sub">Research-station microgrid · forecast-led dispatch · renewable integration</div></div>
-<div><span class="status-pill">● SIMULATION ONLINE</span></div></div>""", unsafe_allow_html=True)
-
-# Top metrics
-m1, m2, m3, m4, m5 = st.columns(5)
-m1.metric("Station demand", f"{avg_load:.1f} kW", f"Peak {peak_load:.1f} kW")
-m2.metric("Diesel consumed", f"{litres(diesel_kwh):,.0f} L", f"{diesel_kwh:,.0f} kWh in window")
-m3.metric("Renewable contribution", f"{renew_share:.1f}%", f"{renewable_kwh:,.0f} kWh supplied")
-m4.metric("Fuel avoided", f"{litres(saved_kwh):,.0f} L", f"{(saved_kwh/base_kwh*100 if base_kwh else 0):.1f}% vs baseline")
-m5.metric("Battery reserve", f"{soc_pct:.0f}%", f"{soc_now:.0f} / {C.BATTERY_CAPACITY_KWH:.0f} kWh")
-
 # Contextual operating condition, from actual selected scenario.
 enewable_available_mean = float((disp.solar_avail + disp.wind_avail).mean())
 diesel_hours = int((disp.diesel_kw > 0.1).sum())
 low_soc = bool((disp.soc_kwh <= C.BATTERY_MIN_SOC_FRAC * C.BATTERY_CAPACITY_KWH + 1).any())
-# Keep a single normalized alert schema for the dashboard and report exporter.
-alerts: list[dict[str, str]] = []
-if renew_share < 30:
-    alerts.append({"severity": "warning", "code": "LOW_RENEWABLE", "title": "Low renewable contribution", "detail": f"Renewables supplied {renew_share:.1f}% of selected-window demand."})
-if low_soc:
-    alerts.append({"severity": "warning", "code": "BATTERY_RESERVE", "title": "Battery reserve touched", "detail": "The dispatch reached the configured minimum state-of-charge threshold."})
-if diesel_hours:
-    alerts.append({"severity": "info", "code": "DIESEL_ACTIVE", "title": "Backup generation used", "detail": f"Diesel was active for {diesel_hours} of {len(disp)} simulated hours."})
-if not alerts:
-    alerts.append({"severity": "success", "code": "NORMAL_OPERATION", "title": "No operating alerts", "detail": "Selected dispatch window remained within configured battery reserve."})
+# Keep alerts in the validated, structured format shared by UI and report.
+alerts = operational_alerts
 
 # Main app navigation
-nav = st.tabs(["OVERVIEW", "FORECAST", "DISPATCH", "ASSETS & ALERTS", "MODEL NOTES", "INTELLIGENCE"])
+nav = st.tabs(["OVERVIEW", "FORECAST", "DISPATCH", "ASSETS & ALERTS", "MODEL NOTES"])
 with nav[0]:
     section("POWER FLOW · SELECTED SCENARIO")
     # Data-driven flow summary: actual energy in selected dispatch window.
@@ -323,12 +320,13 @@ with nav[3]:
             st.markdown(f"<div class='flow-card' style='margin-bottom:12px'><div class='label'>{category}</div><div class='value' style='color:{color}'>{capacity}</div><div style='font-weight:650;margin-top:6px'>{name}</div><div class='foot'>{detail_text}</div></div>", unsafe_allow_html=True)
     section("OPERATIONS / ALERT LOG")
     for alert in alerts:
-        # Defensive rendering: malformed or incomplete alerts must never crash the UI.
-        severity = alert.get("severity", "notice") if isinstance(alert, dict) else "notice"
+        # Defensive display contract: malformed alert data must never crash the UI.
+        alert = alert if isinstance(alert, dict) else {}
+        severity = alert.get("severity", "notice")
         severity = severity.lower() if isinstance(severity, str) else "notice"
-        code = alert.get("code", "GENERAL") if isinstance(alert, dict) else "GENERAL"
-        title = alert.get("title", "Operating alert") if isinstance(alert, dict) else "Operating alert"
-        detail = alert.get("detail", "No details provided.") if isinstance(alert, dict) else str(alert)
+        code = str(alert.get("code", "GENERAL"))
+        title = str(alert.get("title", "Operational notice"))
+        detail = str(alert.get("detail", "No additional details provided."))
         color = {"success": GREEN, "info": BLUE, "warning": AMBER, "notice": RED}.get(severity, MUTED)
         st.markdown(f"<div class='flow-card' style='margin-bottom:8px;border-left:3px solid {color}'><div class='label' style='color:{color}'>{severity.upper()} · {code}</div><div style='font-weight:650;margin:5px 0'>{title}</div><div class='foot'>{detail}</div></div>", unsafe_allow_html=True)
     st.caption("Alerts are generated from the selected simulation window; they are not real station alarms.")
@@ -353,67 +351,5 @@ with nav[4]:
     with st.expander("Project pipeline"):
         st.code("config.py → data_sim.py → forecast.py → optimizer.py → app.py", language="text")
         st.caption("Synthetic data generation · ML forecast · fuel-minimising dispatch · operations dashboard")
-
-with nav[5]:
-    section("DECISION SUPPORT · SIMULATED SCENARIOS")
-    st.caption("Decision-support estimates run on the selected simulated dispatch window. No live telemetry or maintenance sensors are connected.")
-    selected_data = df.iloc[start:start + days * 24]
-
-    st.markdown("### Forecast-aware reserve dispatch")
-    reserve_pct = st.slider("Demand forecast uncertainty margin", 0, 25, 5, 1, format="%d%%", key="smart_reserve")
-    smart_disp, smart_status = forecast_aware_dispatch(selected_data, reserve_pct)
-    smart_metrics = calculate_metrics(smart_disp, smart_status)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Conservative diesel", f"{smart_metrics.diesel_litres:,.1f} L", f"{reserve_pct}% demand margin")
-    c2.metric("Renewables", f"{smart_metrics.renewable_share_pct:.1f}%")
-    c3.metric("Ending SOC", f"{smart_metrics.ending_soc_pct:.1f}%")
-    st.caption("This is a conservative load-envelope what-if using a user-set margin, not a newly trained future prediction. It is dispatched through the same optimizer/fallback engine.")
-    with st.expander("Compare with baseline dispatch"):
-        st.write({"baseline diesel (L)": round(diesel_kwh / C.KWH_PER_LITRE_DIESEL, 1), "conservative diesel (L)": round(smart_metrics.diesel_litres, 1), "difference (L)": round(smart_metrics.diesel_litres - diesel_kwh / C.KWH_PER_LITRE_DIESEL, 1), "solver": smart_status})
-
-
-    st.markdown("### Battery health & cycling estimate")
-    battery = battery_health(disp)
-    b1, b2, b3 = st.columns(3)
-    b1.metric("Estimated SOH", f"{battery['estimated_soh_pct']:.2f}%")
-    b2.metric("Estimated usable capacity", f"{battery['estimated_capacity_kwh']:.1f} kWh")
-    b3.metric("Equivalent full cycles", f"{battery['equivalent_full_cycles_this_run']:.3f}")
-    st.caption(battery["assumption"])
-
-    st.markdown("### Predictive maintenance indicators")
-    maintenance = maintenance_signals(disp, battery)
-    st.dataframe(pd.DataFrame(maintenance), hide_index=True, use_container_width=True)
-    st.caption("Threshold flags are heuristic indicators based on simulated dispatch. They are not diagnoses or sensor-based maintenance predictions.")
-
-    st.markdown("### Weather / load stress lab")
-    stress_specs = [
-        ("Reference", 1.00, 1.00, 1.00),
-        ("High demand (+15%)", 1.15, 1.00, 1.00),
-        ("Low solar (−60%)", 1.00, 0.40, 1.00),
-        ("Low wind (−50%)", 1.00, 1.00, 0.50),
-        ("Combined stress", 1.15, 0.40, 0.50),
-    ]
-    stress_rows = []
-    for label, load_mult, solar_mult, wind_mult in stress_specs:
-        stress_rows.append(run_stress_scenario(selected_data, load_mult, solar_mult, wind_mult, label))
-    stress_table = pd.DataFrame(stress_rows)
-    st.dataframe(stress_table[["scenario", "diesel_litres", "renewable_share_pct", "ending_soc_pct", "solver_status"]].round(2), hide_index=True, use_container_width=True)
-    stress_chart = go.Figure(go.Bar(x=stress_table.scenario, y=stress_table.diesel_litres, name="Diesel fuel (L)"))
-    stress_chart.update_layout(title="Diesel demand under scenario stress", yaxis_title="Estimated fuel (L)")
-    st.plotly_chart(chart_layout(stress_chart, 320, legend=False), use_container_width=True)
-    st.caption("Scenarios are synthetic multiplier tests; they do not represent weather forecasts or site-specific failure probabilities.")
-
-    st.markdown("### Simulation run history")
-    run_record = build_run_summary(disp, scenario, solver_status)
-    if st.button("Save current run summary", key="save_smart_run"):
-        st.session_state["polar_saved_runs"] = save_history_run(run_record)
-        st.success("Run summary saved to the local history file (when filesystem writes are available).")
-    history = st.session_state.get("polar_saved_runs", load_history())
-    if history:
-        st.dataframe(pd.DataFrame(history).tail(20), hide_index=True, use_container_width=True)
-    else:
-        st.info("No saved run summaries yet. Use the button above to save a run.")
-    st.caption(f"History is local JSON and bounded to the newest 50 runs. On ephemeral cloud deployments, it may reset when the app restarts.")
-
 
 st.markdown("<div style='text-align:center;color:#60788B;font-size:11px;padding-top:16px'>POLAR EMS · SIH 2026 · SIH26061 · SIMULATION ENVIRONMENT</div>", unsafe_allow_html=True)
