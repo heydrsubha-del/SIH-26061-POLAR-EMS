@@ -142,7 +142,7 @@ body [data-baseweb="popover"] li:hover,body [data-baseweb="popover"] [role="opti
 .brand-mark{width:40px;height:40px;flex:0 0 40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:19px;background:linear-gradient(145deg,color-mix(in srgb,#4c8dff 22%,var(--panel)),var(--panel-3));border:1px solid color-mix(in srgb,#4c8dff 50%,transparent);box-shadow:0 10px 20px -10px #4c8dff}
 .brand-name{font:750 15px/1.1 Inter,sans-serif;letter-spacing:.06em;color:var(--text)}
 .brand-role{font:500 11.5px/1.3 Inter,sans-serif;color:var(--muted);margin-top:3px}
-.sidebar-group-label{display:flex;align-items:center;gap:10px;margin:clamp(10px,2.2vh,22px) 4px clamp(3px,.7vh,7px) 14px;font:650 10px/1 Inter,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);--g:#4c8dff}
+.sidebar-group-label{display:flex;align-items:center;gap:10px;margin:0 4px 0 14px;padding:clamp(10px,2.2vh,20px) 0 clamp(4px,.8vh,8px);font:650 10px/1 Inter,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);--g:#4c8dff}
 .sidebar-group-label::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--g);box-shadow:0 0 0 3px color-mix(in srgb,var(--g) 18%,transparent)}
 .sidebar-group-label::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,color-mix(in srgb,var(--g) 45%,transparent),transparent)}
 .stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button{position:relative;min-height:clamp(32px,4.4vh,42px) !important;padding:2px 12px 2px 10px !important;border:1px solid transparent !important;border-radius:12px !important;background:transparent !important;transform:none !important;overflow:visible}
