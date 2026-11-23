@@ -150,6 +150,9 @@ body [data-baseweb="popover"] li:hover,body [data-baseweb="popover"] [role="opti
 .stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button p::before{content:"";flex:0 0 26px;width:26px;height:26px;background-color:var(--c,#4c8dff);-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:15px 15px;mask-size:15px 15px}
 .stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button{display:flex !important;align-items:center !important;justify-content:flex-start !important;margin:0 !important;height:40px !important}
 .stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button>div,.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button [data-testid="stMarkdownContainer"]{width:100% !important;margin:0 !important;text-align:left !important}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button div{width:100% !important;justify-content:flex-start !important;text-align:left !important}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button p{justify-content:flex-start !important;text-align:left !important}
+.stApp [data-testid="stSidebar"] .st-key-nav_overview{margin-top:16px !important}
 .stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button:hover{background:linear-gradient(90deg,color-mix(in srgb,var(--c,#4c8dff) 15%,transparent),transparent) !important}
 .stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button:hover p{transform:translateX(3px);color:var(--text) !important}
 .stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button[kind="primary"]{background:linear-gradient(90deg,color-mix(in srgb,var(--c,#4c8dff) 17%,var(--panel-2)),transparent) !important;border-color:color-mix(in srgb,var(--c,#4c8dff) 30%,transparent) !important}
