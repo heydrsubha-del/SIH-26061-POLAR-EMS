@@ -17,49 +17,53 @@ from optimizer import optimize_dispatch, baseline_diesel
 st.set_page_config(page_title="POLAR EMS | Energy Operations", page_icon="❄️", layout="wide", initial_sidebar_state="expanded")
 
 # ---------- Visual system ----------
-BG = "#0A1018"
-PANEL = "#111B26"
-PANEL_2 = "#152230"
-TEXT = "#E7F0F7"
-MUTED = "#8EA4B8"
-CYAN = "#39D6E8"
-BLUE = "#64A8FF"
-GREEN = "#46D6A2"
-AMBER = "#FFB84D"
-RED = "#FF647C"
+BG = "#FFFFFF"
+PANEL = "#FFFFFF"
+PANEL_2 = "#FAFAFA"
+TEXT = "#171717"
+MUTED = "#737373"
+CYAN = "#0070F3"
+BLUE = "#0070F3"
+GREEN = "#00A884"
+AMBER = "#F5A623"
+RED = "#EE0000"
 
 st.markdown(f"""<style>
-:root {{ color-scheme: dark; }}
+:root {{ color-scheme: light; }}
 html, body, [data-testid="stAppViewContainer"] {{ background:{BG}; color:{TEXT}; }}
 [data-testid="stHeader"] {{ background:transparent; }}
-[data-testid="stSidebar"] {{ background:#0D151F; border-right:1px solid #1D2B3A; }}
+[data-testid="stSidebar"] {{ background:#FAFAFA; border-right:1px solid #EBEBEB; }}
 [data-testid="stSidebar"] * {{ color:{TEXT}; }}
-.block-container {{ padding-top:1.25rem; padding-bottom:2.2rem; max-width:1600px; }}
-h1,h2,h3 {{ letter-spacing:-.02em; color:{TEXT}; }}
-[data-testid="stMetric"] {{ background:linear-gradient(145deg,{PANEL},#101923); border:1px solid #223243; padding:16px 18px; border-radius:14px; }}
-[data-testid="stMetricLabel"] {{ color:{MUTED} !important; font-size:.78rem !important; }}
-[data-testid="stMetricValue"] {{ color:{TEXT} !important; font-weight:700; }}
+.block-container {{ padding-top:1.35rem; padding-bottom:2.5rem; max-width:1500px; }}
+h1,h2,h3 {{ letter-spacing:-.035em; color:{TEXT}; font-weight:600; }}
+h1 {{ font-size:2.1rem !important; }}
+[data-testid="stMetric"] {{ background:#FFFFFF; border:1px solid #EAEAEA; padding:16px 18px; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,.025); }}
+[data-testid="stMetricLabel"] {{ color:{MUTED} !important; font-size:.78rem !important; letter-spacing:.02em; }}
+[data-testid="stMetricValue"] {{ color:{TEXT} !important; font-weight:650; }}
 [data-testid="stMetricDelta"] {{ font-size:.78rem; }}
-[data-testid="stTabs"] button {{ color:{MUTED}; }}
+[data-testid="stTabs"] button {{ color:{MUTED}; font-size:.82rem; }}
 [data-testid="stTabs"] button[aria-selected="true"] {{ color:{CYAN}; border-bottom-color:{CYAN}; }}
-[data-testid="stPlotlyChart"] {{ border:1px solid #1F2D3B; border-radius:13px; overflow:hidden; background:{PANEL}; }}
-[data-testid="stExpander"] {{ border:1px solid #233244; border-radius:12px; background:{PANEL}; }}
+[data-testid="stPlotlyChart"] {{ border:1px solid #EBEBEB; border-radius:8px; overflow:hidden; background:{PANEL}; }}
+[data-testid="stExpander"] {{ border:1px solid #EAEAEA; border-radius:8px; background:{PANEL}; }}
 [data-testid="stSelectbox"] label,[data-testid="stSlider"] label {{ color:{MUTED}; }}
-hr {{ border-color:#1F2D3B; }}
-.smallcaps {{ color:{MUTED}; font-size:11px; letter-spacing:1.7px; font-weight:700; }}
-.hero {{ padding:18px 22px; border:1px solid #243445; border-radius:16px; background:linear-gradient(120deg,#111D29,#142839 70%,#11202B); margin-bottom:14px; }}
-.hero-title {{ font-size:24px; font-weight:750; letter-spacing:-.5px; color:#F3FAFF; }}
-.hero-sub {{ color:{MUTED}; font-size:13px; margin-top:4px; }}
-.status-pill {{ display:inline-block; padding:5px 10px; border-radius:999px; background:#12372F; color:{GREEN}; border:1px solid #235746; font-size:11px; font-weight:700; letter-spacing:.7px; }}
-.flow-wrap {{ display:flex; gap:10px; align-items:stretch; justify-content:space-between; flex-wrap:wrap; padding:12px 0 4px; }}
-.flow-card {{ flex:1; min-width:132px; background:{PANEL}; border:1px solid #26394A; border-radius:13px; padding:14px 15px; }}
-.flow-card .label {{ font-size:11px; color:{MUTED}; letter-spacing:1px; text-transform:uppercase; }}
-.flow-card .value {{ font-size:22px; font-weight:750; margin-top:7px; color:{TEXT}; }}
-.flow-card .foot {{ font-size:11px; color:{MUTED}; margin-top:3px; }}
-.flow-arrow {{ align-self:center; color:{CYAN}; font-size:20px; font-weight:800; padding:0 2px; }}
-.section-head {{ display:flex; align-items:center; gap:9px; margin:4px 0 10px; }}
-.section-dot {{ width:8px; height:8px; border-radius:50%; background:{CYAN}; box-shadow:0 0 12px {CYAN}; }}
-</style>""", unsafe_allow_html=True)
+hr {{ border-color:#EBEBEB; }}
+.smallcaps {{ color:{MUTED}; font-size:10px; letter-spacing:1.5px; font-weight:650; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }}
+.hero {{ padding:24px 26px; border:1px solid #EBEBEB; border-radius:10px; background:linear-gradient(115deg,#FAFAFA 0%,#FFFFFF 65%,#F4F8FF 100%); margin-bottom:18px; position:relative; overflow:hidden; }}
+.hero:after {{ content:""; position:absolute; right:-110px; top:-120px; width:330px; height:260px; background:radial-gradient(ellipse at center,rgba(0,112,243,.10),rgba(80,227,194,.09),rgba(255,0,128,.035),transparent 72%); pointer-events:none; }}
+.hero-title {{ font-size:25px; font-weight:650; letter-spacing:-.9px; color:#171717; }}
+.hero-sub {{ color:{MUTED}; font-size:13px; margin-top:5px; }}
+.status-pill {{ display:inline-block; padding:5px 10px; border-radius:6px; background:#F0F7FF; color:#0761D1; border:1px solid #D3E5FF; font-size:10px; font-weight:650; letter-spacing:.6px; }}
+.flow-wrap {{ display:flex; gap:8px; align-items:stretch; justify-content:space-between; flex-wrap:wrap; padding:10px 0 4px; }}
+.flow-card {{ flex:1; min-width:132px; background:{PANEL}; border:1px solid #EAEAEA; border-radius:8px; padding:14px 15px; }}
+.flow-card .label {{ font-size:10px; color:{MUTED}; letter-spacing:1px; text-transform:uppercase; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }}
+.flow-card .value {{ font-size:21px; font-weight:650; margin-top:7px; color:{TEXT}; letter-spacing:-.5px; }}
+.flow-card .foot {{ font-size:11px; color:{MUTED}; margin-top:4px; }}
+.flow-arrow {{ align-self:center; color:{CYAN}; font-size:18px; font-weight:700; padding:0 1px; }}
+.section-head {{ display:flex; align-items:center; gap:9px; margin:5px 0 11px; }}
+.section-dot {{ width:6px; height:6px; border-radius:50%; background:{CYAN}; }}
+button, [data-testid="stDownloadButton"] button {{ border-radius:6px !important; }}
+[data-testid="stDataFrame"] {{ border:1px solid #EBEBEB; border-radius:8px; }}
+</style>""", unsafe_allow_html=True);
 
 
 @st.cache_data(show_spinner="Generating the polar station simulation…")
@@ -89,8 +93,8 @@ def chart_layout(fig, height=330, legend=True):
         height=height, paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT, size=11),
         margin=dict(l=18, r=18, t=36, b=24), hovermode="x unified",
         legend=dict(orientation="h", y=-0.18, x=0, bgcolor="rgba(0,0,0,0)") if legend else dict(visible=False),
-        xaxis=dict(gridcolor="#203040", zerolinecolor="#203040", showline=False),
-        yaxis=dict(gridcolor="#203040", zerolinecolor="#203040", showline=False),
+        xaxis=dict(gridcolor="#F0F0F0", zerolinecolor="#E5E5E5", showline=False),
+        yaxis=dict(gridcolor="#F0F0F0", zerolinecolor="#E5E5E5", showline=False),
     )
     return fig
 
@@ -143,7 +147,7 @@ soc_pct = soc_now / C.BATTERY_CAPACITY_KWH * 100 if C.BATTERY_CAPACITY_KWH else 
 
 # ---------- Sidebar-independent header ----------
 st.markdown(f"""<div class="hero"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-<div><div class="smallcaps">ENERGY OPERATIONS CENTRE · {C.SIM_YEAR}</div><div class="hero-title">Polar Smart Energy Management</div><div class="hero-sub">Research-station microgrid · forecast-led dispatch · renewable integration</div></div>
+<div><div class="smallcaps">ENERGY OPERATIONS CENTRE · {C.SIM_YEAR}</div><div class="hero-title">Polar EMS · Energy Operations</div><div class="hero-sub">Research-station microgrid · forecast-led dispatch · renewable integration</div></div>
 <div><span class="status-pill">● SIMULATION ONLINE</span></div></div>""", unsafe_allow_html=True)
 
 # Top metrics
@@ -199,12 +203,12 @@ with nav[0]:
         mix_colors = [("Solar", "solar_used", "#F4C75A"), ("Wind", "wind_used", BLUE), ("Battery", "discharge_kw", GREEN), ("Diesel", "diesel_kw", AMBER)]
         for name, key, color in mix_colors:
             fig.add_trace(go.Scatter(x=disp.index, y=disp[key], name=name, stackgroup="supply", mode="lines", line=dict(width=0.8, color=color), hovertemplate=f"{name}: %{{y:.1f}} kW<extra></extra>"))
-        fig.add_trace(go.Scatter(x=disp.index, y=disp.load_kw, name="Demand", mode="lines", line=dict(color="#F2F7FB", width=2.3), hovertemplate="Demand: %{y:.1f} kW<extra></extra>"))
+        fig.add_trace(go.Scatter(x=disp.index, y=disp.load_kw, name="Demand", mode="lines", line=dict(color="#171717", width=2.3), hovertemplate="Demand: %{y:.1f} kW<extra></extra>"))
         fig.update_layout(title="Power supply vs station demand", yaxis_title="Power (kW)")
         st.plotly_chart(chart_layout(fig, 350), use_container_width=True)
     with right:
         section("BATTERY RESERVE")
-        fig_soc = go.Figure(go.Indicator(mode="gauge+number", value=soc_pct, number={"suffix":"%", "font":{"color":TEXT,"size":34}}, gauge={"axis":{"range":[0,100],"tickcolor":MUTED},"bar":{"color":GREEN},"bgcolor":PANEL,"bordercolor":"#2B3C4D","steps":[{"range":[0,C.BATTERY_MIN_SOC_FRAC*100],"color":"#3A2028"},{"range":[C.BATTERY_MIN_SOC_FRAC*100,100],"color":"#1C2D3A"}],"threshold":{"line":{"color":AMBER,"width":3},"thickness":0.8,"value":C.BATTERY_MIN_SOC_FRAC*100}}))
+        fig_soc = go.Figure(go.Indicator(mode="gauge+number", value=soc_pct, number={"suffix":"%", "font":{"color":TEXT,"size":34}}, gauge={"axis":{"range":[0,100],"tickcolor":MUTED},"bar":{"color":GREEN},"bgcolor":"#FFFFFF","bordercolor":"#E5E5E5","steps":[{"range":[0,C.BATTERY_MIN_SOC_FRAC*100],"color":"#F7D4D6"},{"range":[C.BATTERY_MIN_SOC_FRAC*100,100],"color":"#F3F8FF"}],"threshold":{"line":{"color":AMBER,"width":3},"thickness":0.8,"value":C.BATTERY_MIN_SOC_FRAC*100}}))
         fig_soc.update_layout(height=260, paper_bgcolor=PANEL, font=dict(color=TEXT), margin=dict(t=20,b=15,l=10,r=10))
         st.plotly_chart(fig_soc, use_container_width=True)
         st.caption(f"Minimum reserve: {C.BATTERY_MIN_SOC_FRAC*100:.0f}% · Capacity: {C.BATTERY_CAPACITY_KWH:.0f} kWh")
