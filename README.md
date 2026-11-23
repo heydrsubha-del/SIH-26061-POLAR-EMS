@@ -1,105 +1,103 @@
-# AI-Driven Smart Energy Management for Polar Research Stations
-**Smart India Hackathon 2026 · Problem Statement SIH26061 (MoES / NCPOR)**
+# Polar EMS — Advanced Energy Operations System
 
-A software system that (1) **forecasts** a polar station's electricity demand with
-a trained ML model and (2) **optimises** how solar, wind, a battery, and a diesel
-genset are used so that **diesel fuel is minimised** — shown on a live dashboard.
+**SIH 2026 · SIH26061**
 
----
+Polar EMS forecasts research-station electricity demand and dispatches solar, wind, battery storage, and diesel backup to reduce diesel use. The project uses a deterministic Antarctic-inspired simulation and must not be represented as connected to real station SCADA unless a real telemetry adapter is separately configured.
 
-## How it fits together (the pipeline)
+## Architecture
 
-```
-config.py     shared numbers (capacities, battery, latitude)
-   │
-data_sim.py   Step 1  →  one simulated year of hourly weather + load
-   │
-forecast.py   Step 2  →  ML model predicts load (trained, held-out tested)
-   │
-optimizer.py  Step 3  →  linear program: cheapest fuel dispatch, hour by hour
-   │
-app.py        Step 4  →  Streamlit dashboard = your live demo
-```
-
-Each of steps 1–3 runs on its own (`python data_sim.py`, etc.) and prints a
-sanity check, so you can build and verify one piece at a time.
-
----
-
-## Setup (Windows)
-
-1. **Install Python 3.11+** — from https://www.python.org/downloads/ and tick
-   *"Add python.exe to PATH"*, or in PowerShell:
-   ```
-   winget install Python.Python.3.12
-   ```
-   Close and reopen the terminal, then check: `python --version`
-
-2. **Create & activate a virtual environment** (in this folder):
-   ```
-   python -m venv .venv
-   ```
-   - PowerShell:  `.venv\Scripts\Activate.ps1`
-   - cmd.exe:     `.venv\Scripts\activate.bat`
-   - Git Bash:    `source .venv/Scripts/activate`
-
-3. **Install the libraries:**
-   ```
-   pip install -r requirements.txt
-   ```
-
-## Run
-
-Verify each piece (optional but recommended):
-```
-python data_sim.py     # prints yearly stats + polar-night / midnight-sun check
-python forecast.py     # prints forecast error (MAE / MAPE)
-python optimizer.py    # prints solver status + fuel saving %
+```text
+config.py          Physical assumptions and simulation configuration
+       │
+data_sim.py        Seeded hourly weather, renewable generation and demand
+       ├───────────────┐
+forecast.py        optimizer.py
+ML load forecast   LP dispatch / deterministic safe fallback
+       └───────┬───────┘
+            ems_core.py     Validated metrics, alerts, run manifest, report
+            health.py       Runtime and configuration diagnostics
+                │
+              app.py         Streamlit operations dashboard
 ```
 
-Launch the demo:
+The dashboard is the presentation layer. Metrics, validation, alert generation, run provenance, and report creation are implemented as framework-independent services so they can be tested without launching Streamlit.
+
+## Advanced engineering features
+
+- **Validated dispatch contract:** required columns, finite values, non-negative physical quantities, and battery SOC bounds are checked before KPIs and exports are generated.
+- **Central metric service:** energy, renewable contribution, diesel, baseline fuel, avoided fuel, CO₂, demand, and battery reserve are computed in one place.
+- **Deterministic operations alerts:** alert codes and severity levels are generated from the selected dispatch window. Fallback solver use is explicitly surfaced.
+- **Reproducible run manifest:** scenario, simulated period, seed, solver status, data mode, generation time, and SHA-256 digest of dispatch output are captured.
+- **Downloadable report:** Markdown operations summary and JSON run manifest accompany the raw dispatch CSV.
+- **Runtime and configuration diagnostics:** dependency availability and physical parameter relationships are shown in the app.
+- **Pure-core tests:** calculation, validation, alert, reporting, and provenance tests run independently of Streamlit.
+- **Cached simulation, forecast, and dispatch:** avoids recomputing the seeded year and model work on every Streamlit rerun.
+
+## Setup
+
+Python 3.10+ is recommended.
+
+```bash
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
 ```
+
+### Run checks
+
+```bash
+python -m pytest
+python data_sim.py
+python forecast.py
+python optimizer.py
+```
+
+The optimizer script may report `Fallback (PuLP unavailable)` if PuLP/CBC is not installed in the active environment. This is expected in minimal test environments; install `pulp` and a working CBC solver to verify the LP path.
+
+### Launch
+
+```bash
 streamlit run app.py
 ```
-A browser tab opens at http://localhost:8501.
 
----
+## Solver behavior
 
-## 90-second demo script (what to say to judges)
+PuLP/CBC is used when available. The optimizer module provides a deterministic fallback when PuLP or its solver is unavailable. The dashboard does not conceal this: the solver status is shown, a fallback alert is created, and the run manifest/report record the status. For authoritative LP optimization, install a working PuLP/CBC environment and confirm the solver reports `Optimal`.
 
-1. **"Polar stations burn expensive, hard-to-resupply diesel. We cut it two
-   ways: predict demand, then optimise supply."**
-2. Point at **Section 1**: *"A trained model forecasts load on 30 days it never
-   saw — error is only a few percent."*
-3. Switch scenario to **Summer**: *"Midnight sun → lots of solar → almost no
-   diesel; the battery soaks up the surplus."*
-4. Switch to **Polar night**: *"Sun never rises, so we lean on wind + battery,
-   and diesel only fills the gaps — here's the fuel and CO₂ we still save."*
-5. Point at the KPI tiles: **litres of fuel saved, renewable share, CO₂ avoided.**
+## Data and operational honesty
 
----
+- The included input series is **seeded synthetic data**, not live station telemetry.
+- The station location and installed capacities are configurable assumptions in `config.py`.
+- Fuel and CO₂ numbers are derived from the conversion factors in `config.py`; they are estimates, not measured emissions.
+- Alerts refer only to the selected simulated window. They are not real operational alarms.
+- Forecast accuracy is measured on the final held-out 30-day window from the seeded dataset.
 
-## Honesty notes (say these — judges reward them)
+## Extending toward a production EMS
 
-- Inputs are **physically simulated**, because no polar-station energy data is
-  public. The solar model uses real solar geometry for 70°S, so polar night and
-  the midnight sun are genuine, not faked.
-- The "AI" is a **real trained model** (gradient boosting) with honest held-out
-  error — not a rule dressed up as AI.
-- Feeding **real** station data later needs only swapping `data_sim.py` for a CSV
-  loader with the same columns.
+A production deployment should add a separately tested telemetry adapter, authenticated operator roles, durable time-series storage, event/audit retention, model drift monitoring, signed configuration releases, and a safety review of control actions. The current project is decision-support simulation: it does not send commands to physical assets.
 
-## Easy ways to go further (if you have time)
+## Intelligent microgrid decision support (new)
 
-- Swap in a real dataset (UCI ElectricityLoadDiagrams) via a CSV loader.
-- Add a diesel on/off **binary** variable to `optimizer.py` (makes it a true
-  MILP with minimum-run constraints).
-- Add a weather/uncertainty slider to show the plan adapting.
-- Export a PDF "energy report" from the dashboard.
+The **INTELLIGENCE** tab adds five decision-support workflows using the existing
+seeded simulation and dispatch engine:
 
-## Troubleshooting
+- **Forecast-aware reserve dispatch:** applies a bounded 0–25% demand uncertainty
+  margin to the selected window and re-dispatches. This is a conservative
+  what-if envelope, not a separate future ML forecast.
+- **Battery health estimate:** reports discharge throughput, equivalent full cycles,
+  and a simplified linear state-of-health/capacity estimate. The assumption is
+  4,000 equivalent full cycles to 80% SOH. Calendar aging, temperature, battery
+  chemistry, and measured voltage/impedance are not modeled.
+- **Predictive maintenance indicators:** heuristic signals for simulated diesel
+  runtime, battery cycling/estimated SOH, and PV utilization. They are not
+  sensor-derived diagnostics or maintenance predictions.
+- **Weather/load stress lab:** compares reference, high-demand, low-solar,
+  low-wind, and combined stress cases using bounded input multipliers.
+- **Local run history:** saves compact summary records to
+  `.polar_ems_history.json`, retaining the newest 50. This file is local and may
+  not persist on ephemeral cloud hosts. It does not save raw dispatch traces.
 
-- `python` not found → reopen the terminal after install; Windows may need the
-  Microsoft Store alias disabled (Settings → Apps → App execution aliases).
-- Solver prints noise → it's silenced (`msg=0`); status should read `Optimal`.
-- Charts empty → make sure you ran `streamlit run app.py`, not `python app.py`.
+These additions are decision-support estimates. The app still uses synthetic
+telemetry and should not be used for real station control without validation,
+real telemetry, and operational safeguards.
