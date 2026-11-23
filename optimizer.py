@@ -31,12 +31,21 @@ def optimize_dispatch(load, solar_avail, wind_avail, soc_init_kwh=None):
             if soc_init_kwh is None else soc_init_kwh)
 
     m = pulp.LpProblem("dispatch", pulp.LpMinimize)
-    pv = pulp.LpVariable.dicts("pv", range(T), lowBound=0)
-    wnd = pulp.LpVariable.dicts("wnd", range(T), lowBound=0)
-    dg = pulp.LpVariable.dicts("dg", range(T), lowBound=0, upBound=C.DIESEL_CAPACITY_KW)
-    ch = pulp.LpVariable.dicts("ch", range(T), lowBound=0, upBound=C.BATTERY_MAX_CHARGE_KW)
-    dis = pulp.LpVariable.dicts("dis", range(T), lowBound=0, upBound=C.BATTERY_MAX_DISCHARGE_KW)
-    soc = pulp.LpVariable.dicts("soc", range(T), lowBound=soc_min, upBound=soc_max)
+
+    # Create variables individually instead of using LpVariable.dicts().
+    # This is compatible with PuLP builds where the dicts helper is unavailable.
+    pv = [pulp.LpVariable(f"pv_{t}", lowBound=0, upBound=float(solar_avail[t]))
+          for t in range(T)]
+    wnd = [pulp.LpVariable(f"wnd_{t}", lowBound=0, upBound=float(wind_avail[t]))
+           for t in range(T)]
+    dg = [pulp.LpVariable(f"dg_{t}", lowBound=0, upBound=C.DIESEL_CAPACITY_KW)
+          for t in range(T)]
+    ch = [pulp.LpVariable(f"ch_{t}", lowBound=0, upBound=C.BATTERY_MAX_CHARGE_KW)
+          for t in range(T)]
+    dis = [pulp.LpVariable(f"dis_{t}", lowBound=0, upBound=C.BATTERY_MAX_DISCHARGE_KW)
+           for t in range(T)]
+    soc = [pulp.LpVariable(f"soc_{t}", lowBound=soc_min, upBound=soc_max)
+           for t in range(T)]
 
     # Objective: minimise diesel energy. Tiny penalty discourages pointless
     # simultaneous charge+discharge so the schedule stays clean.
@@ -44,8 +53,6 @@ def optimize_dispatch(load, solar_avail, wind_avail, soc_init_kwh=None):
           + 1e-3 * pulp.lpSum(ch[t] + dis[t] for t in range(T)))
 
     for t in range(T):
-        pv[t].upBound = float(solar_avail[t])    # cannot use more than available
-        wnd[t].upBound = float(wind_avail[t])
         # Power balance: everything supplied == load served + battery charging
         m += pv[t] + wnd[t] + dg[t] + dis[t] == load[t] + ch[t]
         # Battery state of charge (1-hour steps, so kW * 1h == kWh)
