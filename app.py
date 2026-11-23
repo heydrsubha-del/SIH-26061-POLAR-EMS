@@ -1,8 +1,12 @@
-"""Polar EMS — professional operations dashboard for the SIH26061 demo.
+"""Polar EMS - energy operations console (SIH26061).
 
-All displayed values come from the project's seeded simulation and existing
-forecast/dispatch modules. This is simulated operational telemetry, not live SCADA.
+All values come from the seeded simulation plus the project's forecast,
+dispatch and smart_ops modules. Simulated telemetry, not live SCADA.
 """
+import html
+import json
+import urllib.parse as _up
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -11,317 +15,618 @@ import streamlit as st
 import config as C
 from data_sim import generate_year
 from forecast import forecast_load
-from optimizer import optimize_dispatch, baseline_diesel
+from optimizer import optimize_dispatch
 from ems_core import calculate_metrics, build_operational_alerts, build_run_manifest, export_report
 from health import runtime_diagnostics, configuration_diagnostics
+from smart_ops import (battery_health, maintenance_signals, run_stress_scenario,
+                       forecast_aware_dispatch, load_history, save_history_run, build_run_summary)
 
+st.set_page_config(page_title="Polar EMS | Energy Operations", page_icon="❄️",
+                   layout="wide", initial_sidebar_state="expanded")
 
-st.set_page_config(page_title="POLAR EMS | Energy Operations", page_icon="❄️", layout="wide", initial_sidebar_state="expanded")
+# ====================== state + theme ======================
+st.session_state.setdefault("polar_dark", True)
+NAV = ["Overview", "Forecast", "Dispatch", "Scenarios", "Assets & Alerts", "Model Notes"]
+st.session_state.setdefault("active_panel", NAV[0])
 
-# ---------- Theme ----------
-st.session_state.setdefault("polar_theme_dark", False)
-head_l, head_r = st.columns([6, 1.3])
-with head_r:
-    dark_mode = st.toggle("Dark mode", key="polar_theme_dark")
+with st.container(key="theme_row"):
+    _l, _r = st.columns([9, 1.6])
+    with _r:
+        DARK = st.toggle("Dark mode", key="polar_dark")
 
-if dark_mode:
-    BG, PANEL, PANEL_2, TEXT, MUTED = "#0A0C10", "#11151B", "#161B22", "#F2F4F7", "#8B96A3"
-    BLUE, GREEN, AMBER, RED, SOLAR = "#4DA3FF", "#3DDC97", "#FFBD4A", "#FF5B65", "#F4C75A"
-    BORDER, GRID, CHIP_BG, CHIP_FG = "#262D37", "#1E252E", "#12263B", "#8CC4FF"
+if DARK:
+    TOK = dict(bg="#0a0d12", panel="#10151c", panel2="#141b24", panel3="#0c1117", line="#1c2531", line2="#2a3544",
+               text="#e9eef5", muted="#8b97a8", on="#0a0d12", glassa="#131923", glassb="#0d1219",
+               sidea="#0c1322", sideb="#070b12", dot="#3a4658", ok="#34d399", warn="#f5b14a", bad="#fb7185",
+               shadow="0 14px 34px -18px rgba(0,0,0,.85)", shadows="0 8px 20px -14px rgba(0,0,0,.8)")
+    TONES = {"Overview": "#2fb68e", "Forecast": "#a78bfa", "Dispatch": "#38bdf8",
+             "Scenarios": "#f59e0b", "Assets & Alerts": "#fb7185", "Model Notes": "#94a3b8"}
+    SOLAR, WINDC, BATT, DIESEL = "#f4c75a", "#4da3ff", "#3ddc97", "#ffb04a"
 else:
-    BG, PANEL, PANEL_2, TEXT, MUTED = "#FFFFFF", "#FFFFFF", "#FAFAFA", "#171717", "#6B7280"
-    BLUE, GREEN, AMBER, RED, SOLAR = "#0070F3", "#00A884", "#D98200", "#E5484D", "#E5A800"
-    BORDER, GRID, CHIP_BG, CHIP_FG = "#EAEAEA", "#F1F1F1", "#F0F7FF", "#0060D0"
-CYAN = BLUE
+    TOK = dict(bg="#f3f5f8", panel="#ffffff", panel2="#f8fafc", panel3="#f1f4f8", line="#e4e8ee", line2="#d3d9e2",
+               text="#121722", muted="#5d6877", on="#ffffff", glassa="#ffffff", glassb="#f1f4f8",
+               sidea="#ffffff", sideb="#f4f6f9", dot="#b9c2cf", ok="#0f9a73", warn="#b97800", bad="#d6334d",
+               shadow="0 14px 30px -20px rgba(20,30,50,.28)", shadows="0 6px 16px -12px rgba(20,30,50,.25)")
+    TONES = {"Overview": "#0f9a73", "Forecast": "#7c5ce6", "Dispatch": "#0b84d6",
+             "Scenarios": "#c47f00", "Assets & Alerts": "#d6334d", "Model Notes": "#5d6877"}
+    SOLAR, WINDC, BATT, DIESEL = "#d99a00", "#0070f3", "#0f9a73", "#d9741a"
 
-st.markdown(f"""<style>
-:root {{ color-scheme:{'dark' if dark_mode else 'light'}; }}
-html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], [data-testid="stMain"] {{ background:{BG} !important; color:{TEXT} !important; }}
-[data-testid="stHeader"] {{ background:transparent; }}
-#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"] {{ visibility:hidden; }}
-[data-stale="true"] {{ opacity:1 !important; transition:none !important; }}
-.block-container {{ padding-top:1.4rem; padding-bottom:2.5rem; max-width:1500px; }}
-[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li {{ color:{TEXT}; }}
-[data-testid="stWidgetLabel"] p, label {{ color:{MUTED} !important; font-size:.8rem; }}
-h1,h2,h3 {{ letter-spacing:-.03em; color:{TEXT}; font-weight:600; }}
-input, textarea, [data-baseweb="input"] > div, [data-baseweb="select"] > div {{ background:{PANEL} !important; color:{TEXT} !important; border-color:{BORDER} !important; box-shadow:none !important; }}
-[data-baseweb="select"] span {{ color:{TEXT} !important; }}
-[data-baseweb="popover"] ul, [data-baseweb="popover"] [role="listbox"] {{ background:{PANEL} !important; }}
-[data-baseweb="popover"] li, [data-baseweb="popover"] [role="option"] {{ background:{PANEL} !important; color:{TEXT} !important; }}
-[data-baseweb="popover"] li:hover, [data-baseweb="popover"] [role="option"]:hover {{ background:{PANEL_2} !important; }}
-[data-testid="stVerticalBlockBorderWrapper"] {{ border-color:{BORDER} !important; border-radius:10px; background:{PANEL}; }}
-[data-testid="stToggle"] [role="switch"][aria-checked="true"] {{ background:{BLUE} !important; }}
-[data-testid="stSidebar"], [data-testid="stSidebar"] [data-testid="stSidebarContent"] {{ background:{PANEL_2}; border-right:1px solid {BORDER}; }}
-[data-testid="stSidebar"] * {{ color:{TEXT}; }}
-[data-testid="stTabs"] button {{ color:{MUTED}; font-size:.8rem; letter-spacing:.04em; }}
-[data-testid="stTabs"] button[aria-selected="true"] {{ color:{TEXT}; }}
-[data-testid="stPlotlyChart"], [data-testid="stDataFrame"], [data-testid="stExpander"] {{ border:1px solid {BORDER}; border-radius:10px; overflow:hidden; background:{PANEL}; }}
-button, [data-testid="stDownloadButton"] button {{ border-radius:8px !important; }}
-hr {{ border-color:{BORDER}; }}
-.smallcaps, .eyebrow {{ color:{MUTED}; font-size:10px; letter-spacing:1.5px; font-weight:650; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }}
-.hdr-t {{ font-size:26px; font-weight:650; letter-spacing:-.9px; color:{TEXT}; margin-top:4px; }}
-.hdr-t span {{ color:{MUTED}; font-weight:500; }}
-.hdr-s {{ color:{MUTED}; font-size:13px; margin-top:4px; }}
-.chips {{ display:flex; gap:6px; flex-wrap:wrap; }}
-.chip {{ display:inline-block; padding:4px 9px; border-radius:6px; background:{CHIP_BG}; color:{CHIP_FG}; border:1px solid {BORDER}; font-size:10px; font-weight:650; letter-spacing:.6px; }}
-.kpi-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin:14px 0 18px; }}
-.kpi, .flow-card {{ background:{PANEL}; border:1px solid {BORDER}; border-radius:10px; padding:15px 17px; }}
-.kpi-l, .flow-card .label {{ font-size:11px; color:{MUTED}; letter-spacing:.8px; text-transform:uppercase; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }}
-.kpi-v, .flow-card .value {{ font-size:26px; font-weight:650; margin-top:8px; color:{TEXT}; letter-spacing:-.6px; line-height:1.1; }}
-.flow-card .value {{ font-size:21px; }}
-.kpi-f, .flow-card .foot {{ font-size:12px; color:{MUTED}; margin-top:6px; }}
-.flow-wrap {{ display:flex; gap:8px; align-items:stretch; flex-wrap:wrap; padding:6px 0 4px; }}
-.flow-wrap .flow-card {{ flex:1; min-width:150px; }}
-.flow-arrow {{ align-self:center; color:{MUTED}; font-size:18px; }}
-.section-head {{ display:flex; align-items:center; gap:9px; margin:8px 0 10px; }}
-.section-dot {{ width:6px; height:6px; border-radius:50%; background:{BLUE}; }}
-</style>""", unsafe_allow_html=True)
+PANEL = st.session_state["active_panel"]
+TONE = TONES.get(PANEL, "#2fb68e")
 
-head_l.markdown(f"<div class='eyebrow'>ENERGY OPERATIONS CENTRE · {C.SIM_YEAR}</div><div class='hdr-t'>Polar EMS <span>Energy Operations</span></div><div class='hdr-s'>Research-station microgrid · forecast-led dispatch · renewable integration</div><div class='chips' style='margin-top:10px'><span class='chip'>● SIMULATION ONLINE</span></div>", unsafe_allow_html=True)
+_VARS = {
+    "--bg": TOK["bg"], "--panel": TOK["panel"], "--panel-2": TOK["panel2"], "--panel-3": TOK["panel3"],
+    "--line": TOK["line"], "--line-strong": TOK["line2"], "--text": TOK["text"], "--muted": TOK["muted"],
+    "--on-accent": TOK["on"], "--glass-a": TOK["glassa"], "--glass-b": TOK["glassb"],
+    "--side-a": TOK["sidea"], "--side-b": TOK["sideb"], "--dot": TOK["dot"], "--ok": TOK["ok"],
+    "--warn": TOK["warn"], "--bad": TOK["bad"], "--shadow": TOK["shadow"], "--shadow-sm": TOK["shadows"],
+    "--tone": TONE, "--tone-soft": f"color-mix(in srgb,{TONE} 14%,transparent)",
+}
+_root = "html body .stApp{" + ";".join(f"{k}:{v}" for k, v in _VARS.items()) + ";color-scheme:" + ("dark" if DARK else "light") + "}"
+_root += "body [data-baseweb=\"popover\"]{" + ";".join(f"{k}:{v}" for k, v in _VARS.items()) + "}"
+
+STATIC_CSS = r'''
+html body .stApp{background:var(--bg) !important;color:var(--text) !important;font-family:Inter,"Segoe UI",system-ui,sans-serif}
+html body .stApp [data-testid="stAppViewContainer"],html body .stApp [data-testid="stMain"]{background:transparent !important}
+html body .stApp [data-testid="stHeader"]{background:transparent !important}
+html,body{overflow-x:hidden !important;max-width:100vw !important}
+#MainMenu,footer,[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{visibility:hidden !important}
+[data-stale="true"]{opacity:1 !important;transition:none !important}
+.stApp .block-container{padding:2rem 1.35rem 3rem !important;max-width:1500px}
+.stApp :is(p,li,h1,h2,h3,h4,h5,h6){color:var(--text)}
+.stApp [data-testid="stWidgetLabel"] p,.stApp label p{color:var(--muted) !important;font-size:12px !important;font-weight:600 !important;letter-spacing:.02em}
+.stApp [data-testid="stCaptionContainer"],.stApp [data-testid="stCaptionContainer"] p{color:var(--muted) !important}
+.stApp hr{border:0 !important;height:1px;background:linear-gradient(90deg,var(--tone),var(--line) 40%,transparent) !important;opacity:.7}
+/* page-level flow: collapse style-only blocks */
+.stApp .stElementContainer:has(> [data-testid="stMarkdown"] > [data-testid="stMarkdownContainer"] > style:only-child),
+.stApp [data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"] > style:only-child){display:none !important}
+/* inputs */
+.stApp [data-baseweb="select"]>div,.stApp [data-baseweb="input"]>div,.stApp input,.stApp textarea{background:var(--panel-3) !important;color:var(--text) !important;border-color:var(--line-strong) !important;border-radius:10px !important;box-shadow:none !important}
+.stApp [data-baseweb="select"] span,.stApp [data-baseweb="select"] svg{color:var(--text) !important;fill:var(--text) !important}
+.stApp [data-baseweb="select"]:focus-within>div,.stApp input:focus{border-color:var(--tone) !important;box-shadow:0 0 0 3px var(--tone-soft) !important}
+body [data-baseweb="popover"] ul,body [data-baseweb="popover"] [role="listbox"]{background:var(--panel) !important;border:1px solid var(--line-strong) !important;border-radius:12px !important}
+body [data-baseweb="popover"] li,body [data-baseweb="popover"] [role="option"]{background:var(--panel) !important;color:var(--text) !important}
+body [data-baseweb="popover"] li:hover,body [data-baseweb="popover"] [role="option"]:hover,body [data-baseweb="popover"] [aria-selected="true"]{background:var(--tone-soft) !important}
+.stApp [data-testid="stSlider"] [data-testid="stThumbValue"],.stApp [data-testid="stSlider"] [data-testid="stTickBarMin"],.stApp [data-testid="stSlider"] [data-testid="stTickBarMax"]{color:var(--muted) !important}
+.stApp [data-testid="stSlider"] [role="slider"]{background:var(--tone) !important;border-color:var(--tone) !important;box-shadow:0 0 0 4px var(--tone-soft) !important}
+/* toggle */
+.stApp [data-testid="stToggle"] label p{color:var(--text) !important;font-weight:600 !important}
+.stApp [data-testid="stToggle"] [role="switch"]{background:var(--line-strong) !important;border:1px solid var(--line-strong) !important}
+.stApp [data-testid="stToggle"] [role="switch"][aria-checked="true"]{background:var(--tone) !important;border-color:var(--tone) !important}
+/* buttons */
+.stApp :is(.stButton,.stDownloadButton) button{min-height:38px;border-radius:10px !important;font:650 13px/1 Inter,sans-serif !important;color:var(--text) !important;background:var(--panel-2) !important;border:1px solid var(--line-strong) !important;box-shadow:none !important;transition:border-color .18s,background .18s,transform .18s !important}
+.stApp :is(.stButton,.stDownloadButton) button:hover{border-color:var(--tone) !important;background:var(--tone-soft) !important;transform:translateY(-1px)}
+.stApp .stButton button[kind="primary"]{background:linear-gradient(180deg,var(--tone),color-mix(in srgb,var(--tone) 70%,#000)) !important;color:var(--on-accent) !important;border-color:transparent !important}
+.stApp .stButton button[kind="primary"] p{color:var(--on-accent) !important}
+/* expander / plotly / code */
+.stApp [data-testid="stExpander"]{background:var(--panel) !important;border:1px solid var(--line-strong) !important;border-left:3px solid var(--tone) !important;border-radius:12px !important}
+.stApp [data-testid="stExpander"] summary,.stApp [data-testid="stExpander"] summary p{color:var(--text) !important;font-weight:650}
+.stApp [data-testid="stPlotlyChart"]{border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;background:var(--panel);box-shadow:var(--shadow)}
+.stApp .st-key-ctl_card{border:1px solid var(--line-strong) !important;border-radius:14px !important;background:linear-gradient(180deg,var(--panel-2),var(--panel)) !important;padding:14px 18px 10px !important;box-shadow:var(--shadow)}
+/* theme toggle row */
+.stApp .st-key-theme_row{display:flex;justify-content:flex-end}
+.stApp .st-key-theme_row [data-testid="stToggle"]{padding:6px 12px;border:1px solid var(--line-strong);border-radius:999px;background:var(--panel)}
+/* ---------- top banner ---------- */
+.topbar-shell{position:relative;overflow:hidden;isolation:isolate;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px 28px;padding:20px 26px 18px;margin:4px 0 18px;border:1px solid transparent;border-radius:14px;
+background:radial-gradient(70% 140% at 100% 0%,color-mix(in srgb,#4c8dff 11%,transparent),transparent 62%) padding-box,linear-gradient(180deg,var(--glass-a),var(--glass-b)) padding-box,linear-gradient(135deg,color-mix(in srgb,#4c8dff 60%,transparent),var(--line) 34%,var(--line) 66%,color-mix(in srgb,#e0708c 50%,transparent)) border-box;box-shadow:var(--shadow)}
+.topbar-shell::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,#3b82f6,#8b5cf6 28%,#db2777 55%,#f59e0b 78%,#14b8a6);opacity:.9}
+.topbar-shell::after{content:"";position:absolute;inset:0;z-index:-1;background-image:radial-gradient(var(--dot) 1px,transparent 1.2px);background-size:14px 14px;-webkit-mask-image:linear-gradient(90deg,transparent 38%,#000);mask-image:linear-gradient(90deg,transparent 38%,#000);opacity:.5}
+.topbar-brand{display:flex;align-items:center;gap:16px;min-width:0;flex:1 1 420px}
+.topbar-logo{width:46px;height:46px;flex:0 0 46px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:22px;background:var(--panel-3);border:1px solid var(--line-strong)}
+.topbar-kicker{display:flex;align-items:center;gap:10px;margin-bottom:7px;font:700 10.5px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.topbar-kicker .tb-brand{background:linear-gradient(90deg,#4c8dff,#a78bfa);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.topbar-kicker .tb-sep{width:18px;height:1px;background:currentColor;opacity:.45}
+.topbar-title{font-size:21px;font-weight:750;letter-spacing:-.012em;color:var(--text)}
+.topbar-status-wrap{display:flex;align-items:center;gap:10px}
+.topbar-chip{display:flex;align-items:center;gap:9px;padding:7px 13px;border-radius:10px;font:600 11.5px/1 Inter,sans-serif;white-space:nowrap;color:var(--text);background:var(--panel-3);border:1px solid var(--line-strong)}
+.topbar-chip.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent);background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.topbar-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent);animation:tbDot 2.6s ease-in-out infinite}
+@keyframes tbDot{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--ok) 6%,transparent)}}
+.topbar-subtitle{order:3;flex:1 1 100%;display:flex;flex-wrap:wrap;gap:6px 22px;padding-top:12px;margin:0;background:linear-gradient(90deg,var(--line-strong),transparent 85%) top left/100% 1px no-repeat;font-size:11.5px;color:var(--muted)}
+.tb-tag{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;--tc:#4c8dff}
+.tb-tag::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--tc);box-shadow:0 0 0 3px color-mix(in srgb,var(--tc) 24%,transparent)}
+.tb-tag:nth-child(2){--tc:#8b7cf6}.tb-tag:nth-child(3){--tc:#38b2a3}.tb-tag:nth-child(4){--tc:#e0a050}.tb-tag:nth-child(5){--tc:#e0708c}.tb-tag:nth-child(6){--tc:#8fa1b6}
+@media(max-width:640px){.topbar-subtitle{display:none}.topbar-title{font-size:17px}.topbar-status-wrap{width:100%}}
+/* ---------- capsule nav ---------- */
+.stApp .st-key-topnav{position:relative;margin:38px 0 14px !important;padding:0 !important;border-radius:32px;border:1px solid var(--line-strong);background:linear-gradient(180deg,var(--glass-a),var(--glass-b));box-shadow:var(--shadow)}
+.stApp .st-key-topnav [data-testid="stWidgetLabel"]{display:none !important}
+.stApp .st-key-topnav [role="radiogroup"]{display:flex !important;flex-wrap:nowrap !important;align-items:flex-end;gap:4px !important;margin-top:-28px !important;padding:34px 28px 8px !important;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;background:none !important;border:0 !important}
+.stApp .st-key-topnav [role="radiogroup"]::-webkit-scrollbar{display:none}
+.stApp .st-key-topnav [role="radiogroup"] label{position:relative;flex:0 0 auto;display:flex !important;flex-direction:column;align-items:center;justify-content:flex-end;min-width:96px;padding:12px 14px 11px !important;border:0 !important;border-radius:18px;background:transparent !important;cursor:pointer}
+.stApp .st-key-topnav [role="radiogroup"] label>div:first-child,.stApp .st-key-topnav [role="radiogroup"] label input{display:none !important}
+.stApp .st-key-topnav [role="radiogroup"] label p{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:7px;margin:0 !important;white-space:nowrap;font:600 11.5px/1.15 Inter,sans-serif !important;letter-spacing:.025em;color:var(--muted) !important;transition:color .2s}
+.stApp .st-key-topnav [role="radiogroup"] label p::before{content:"";width:22px;height:22px;background-color:var(--c,#2fb68e);opacity:.85;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;transition:transform .32s cubic-bezier(.34,1.56,.64,1),opacity .2s}
+.stApp .st-key-topnav [role="radiogroup"] label:hover p{color:var(--text) !important}
+.stApp .st-key-topnav [role="radiogroup"] label:hover p::before{opacity:1;transform:translateY(-3px) scale(1.12)}
+.stApp .st-key-topnav [role="radiogroup"] label:has(input:checked)::before{content:"";position:absolute;z-index:1;left:50%;top:-20px;width:52px;height:52px;margin-left:-26px;border-radius:50%;background:linear-gradient(150deg,var(--c),color-mix(in srgb,var(--c) 62%,#000));border:6px solid var(--bg);box-shadow:0 0 0 1px color-mix(in srgb,var(--c) 60%,transparent),0 12px 22px -6px var(--c);animation:navLift .42s cubic-bezier(.34,1.56,.64,1)}
+.stApp .st-key-topnav [role="radiogroup"] label:has(input:checked) p{color:var(--c) !important;font-weight:750 !important}
+.stApp .st-key-topnav [role="radiogroup"] label:has(input:checked) p::before{background-color:var(--on-accent);opacity:1;transform:translateY(-17px) scale(1.04)}
+@keyframes navLift{from{transform:translateY(14px) scale(.7);opacity:0}to{transform:none;opacity:1}}
+/* ---------- sidebar ---------- */
+.stApp [data-testid="stSidebar"]{background:linear-gradient(180deg,var(--side-a),var(--side-b)) !important;border-right:1px solid var(--line) !important}
+.stApp [data-testid="stSidebar"]>div{background:transparent !important}
+.stApp [data-testid="stSidebar"] [data-testid="stSidebarHeader"]{height:26px !important;min-height:0 !important}
+.stApp [data-testid="stSidebar"] [data-testid="stSidebarUserContent"]{padding:0 14px !important}
+.stApp [data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:clamp(2px,.5vh,6px) !important}
+.stApp [data-testid="stSidebar"] [data-testid="stMarkdown"]{margin:0 !important}
+.sidebar-brand-v2{display:flex;align-items:center;gap:12px;margin:2px 0 8px;padding:2px 4px}
+.brand-mark{width:40px;height:40px;flex:0 0 40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:19px;background:linear-gradient(145deg,color-mix(in srgb,#4c8dff 22%,var(--panel)),var(--panel-3));border:1px solid color-mix(in srgb,#4c8dff 50%,transparent);box-shadow:0 10px 20px -10px #4c8dff}
+.brand-name{font:750 15px/1.1 Inter,sans-serif;letter-spacing:.06em;color:var(--text)}
+.brand-role{font:500 11.5px/1.3 Inter,sans-serif;color:var(--muted);margin-top:3px}
+.sidebar-group-label{display:flex;align-items:center;gap:10px;margin:clamp(10px,2.2vh,22px) 4px clamp(3px,.7vh,7px) 14px;font:650 10px/1 Inter,sans-serif;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);--g:#4c8dff}
+.sidebar-group-label::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--g);box-shadow:0 0 0 3px color-mix(in srgb,var(--g) 18%,transparent)}
+.sidebar-group-label::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,color-mix(in srgb,var(--g) 45%,transparent),transparent)}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button{position:relative;min-height:clamp(32px,4.4vh,42px) !important;padding:2px 12px 2px 10px !important;border:1px solid transparent !important;border-radius:12px !important;background:transparent !important;transform:none !important;overflow:visible}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button p{display:flex !important;align-items:center;gap:12px;width:100%;margin:0 !important;font:560 13.5px/1.2 Inter,sans-serif !important;color:var(--muted) !important;transition:transform .3s,color .2s;position:relative;z-index:1}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button p::before{content:"";flex:0 0 26px;width:26px;height:26px;background-color:var(--c,#4c8dff);-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:15px 15px;mask-size:15px 15px}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button::before{content:"";position:absolute;left:10px;top:50%;width:26px;height:26px;border-radius:8px;transform:translateY(-50%);background:color-mix(in srgb,var(--c,#4c8dff) 14%,var(--panel-3));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c,#4c8dff) 28%,transparent);transition:all .25s}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button:hover{background:linear-gradient(90deg,color-mix(in srgb,var(--c,#4c8dff) 15%,transparent),transparent) !important}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button:hover p{transform:translateX(3px);color:var(--text) !important}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button[kind="primary"]{background:linear-gradient(90deg,color-mix(in srgb,var(--c,#4c8dff) 17%,var(--panel-2)),transparent) !important;border-color:color-mix(in srgb,var(--c,#4c8dff) 30%,transparent) !important}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button[kind="primary"] p{color:var(--text) !important;font-weight:700 !important}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button[kind="primary"] p::before{background-color:var(--on-accent)}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button[kind="primary"]::before{background:linear-gradient(145deg,var(--c),color-mix(in srgb,var(--c) 62%,#000));box-shadow:0 8px 16px -6px var(--c)}
+.stApp [data-testid="stSidebar"] [class*="st-key-nav_"] button[kind="primary"]::after{content:"";position:absolute;left:-11px;top:50%;width:4px;height:20px;border-radius:0 4px 4px 0;transform:translateY(-50%);background:var(--c);box-shadow:0 0 14px var(--c)}
+.sb-status{display:flex;align-items:center;gap:14px;margin-top:22px;padding:10px 12px;border-radius:13px;border:1px solid var(--line-strong);background:var(--panel-2)}
+.sb-status .dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
+.sb-stat{display:flex;flex-direction:column;gap:3px}.sb-stat b{font:750 15px/1 Inter,sans-serif;color:var(--text)}.sb-stat i{font:600 9.5px/1 Inter,sans-serif;font-style:normal;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.sb-prof{display:flex;align-items:center;gap:11px;margin-top:10px;padding:8px 11px;border-radius:13px;border:1px solid var(--line-strong);background:var(--panel-2)}
+.sb-prof .av{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;background:linear-gradient(145deg,#4c8dff,#8b7cff)}
+.sb-prof b{display:block;font:650 12.5px/1.2 Inter,sans-serif;color:var(--text)}.sb-prof i{display:block;font:500 11px/1.2 Inter,sans-serif;font-style:normal;color:var(--muted)}
+/* ---------- banners / sections / kpis ---------- */
+.part-banner{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:18px 24px 18px 30px;margin:8px 0 16px;border-radius:14px;border:1px solid color-mix(in srgb,var(--tone) 30%,var(--line-strong));
+background:radial-gradient(110% 170% at 0% 0%,color-mix(in srgb,var(--tone) 20%,transparent),transparent 60%),linear-gradient(180deg,var(--panel-2),var(--panel));box-shadow:var(--shadow)}
+.part-banner::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--tone)}
+.pb-step{display:inline-flex;align-items:center;gap:10px;margin-bottom:9px;font:700 10.5px/1 ui-monospace,Consolas,monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--tone)}
+.pb-step::before{content:"";width:18px;height:1px;background:currentColor;opacity:.65}
+.pb-title{font:750 22px/1.25 Inter,sans-serif;color:var(--text);letter-spacing:-.01em}
+.pb-sub{margin-top:4px;max-width:78ch;font-size:13px;line-height:1.5;color:var(--muted)}
+.pb-scope{display:inline-flex;align-items:center;gap:9px;font:600 10.5px/1 ui-monospace,Consolas,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.pb-scope::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--tone);box-shadow:0 0 0 3px var(--tone-soft)}
+.sec-head{position:relative;margin:28px 0 12px;padding:2px 0 2px 16px}
+.sec-head::before{content:"";position:absolute;left:0;top:3px;bottom:3px;width:3px;border-radius:3px;background:var(--tone)}
+.sh-title{font:750 17px/1.3 Inter,sans-serif;color:var(--text)}.sh-sub{margin-top:3px;font-size:12.5px;color:var(--muted)}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:6px 0 16px}
+.kpi{position:relative;overflow:hidden;padding:15px 16px 14px 20px;border-radius:12px;border:1px solid var(--line-strong);background:radial-gradient(130% 160% at 0% 0%,color-mix(in srgb,var(--k) 13%,transparent),transparent 60%),linear-gradient(180deg,var(--panel-2),var(--panel));box-shadow:var(--shadow-sm);transition:border-color .2s}
+.kpi:hover{border-color:color-mix(in srgb,var(--k) 45%,var(--line-strong))}
+.kpi::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--k),color-mix(in srgb,var(--k) 20%,transparent))}
+.kpi-l{display:flex;align-items:center;gap:8px;font:600 10.5px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.kpi-v{margin-top:9px;font:750 27px/1.1 Inter,sans-serif;letter-spacing:-.02em;color:var(--text);font-variant-numeric:tabular-nums}
+.kpi-f{margin-top:7px;font-size:12px;color:var(--muted)}
+.flow-wrap{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}
+.flow-card{flex:1;min-width:150px;position:relative;padding:15px 17px;border-radius:12px;border:1px solid var(--line-strong);background:linear-gradient(180deg,var(--panel-2),var(--panel));box-shadow:var(--shadow-sm)}
+.flow-card .label{font:600 10.5px/1 ui-monospace,Consolas,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.flow-card .value{margin-top:9px;font:750 21px/1.1 Inter,sans-serif;letter-spacing:-.02em;color:var(--fc,var(--text))}
+.flow-card .foot{margin-top:6px;font-size:11.5px;color:var(--muted)}
+.flow-arrow{align-self:center;color:var(--muted);font-size:20px}
+.stat-card{padding:15px 17px;border-radius:12px;border:1px solid var(--line-strong);background:linear-gradient(180deg,var(--panel-2),var(--panel));margin-bottom:12px;border-left:3px solid var(--sc,var(--tone))}
+.stat-card .t{font:650 14px/1.3 Inter,sans-serif;color:var(--text);margin:5px 0 2px}.stat-card .d{font-size:12.5px;color:var(--muted);line-height:1.5}
+.stat-card .e{font:700 10.5px/1 ui-monospace,Consolas,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--sc,var(--tone))}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{padding:5px 9px;border-radius:6px;font:600 10.5px/1 ui-monospace,Consolas,monospace;letter-spacing:.06em;color:var(--tone);border:1px solid color-mix(in srgb,var(--tone) 40%,transparent);background:var(--tone-soft)}
+/* ---------- tables ---------- */
+.pt-shell{margin:8px 0 14px}
+.pt-wrap{position:relative;overflow:auto;border:1px solid var(--line-strong);border-bottom:0;border-radius:14px 14px 0 0;background:var(--panel);box-shadow:var(--shadow-sm)}
+.pt-wrap::before{content:"";display:block;position:sticky;top:0;left:0;z-index:3;height:2px;margin-bottom:-2px;background:linear-gradient(90deg,var(--tone),transparent 85%)}
+table.pt{width:100%;border-collapse:separate;border-spacing:0;font:13px/1.4 Inter,sans-serif;font-variant-numeric:tabular-nums}
+table.pt thead th{position:sticky;top:0;z-index:1;text-align:left;padding:13px 18px 11px;background:var(--panel-2);color:var(--muted);font:700 10.5px/1 Inter,sans-serif;letter-spacing:.13em;text-transform:uppercase;border-bottom:1px solid var(--line-strong);white-space:nowrap}
+table.pt thead th::before{content:"";display:inline-block;vertical-align:middle;margin:-2px 9px 0 0;width:6px;height:6px;border-radius:50%;background:var(--tc);box-shadow:0 0 0 3px color-mix(in srgb,var(--tc) 24%,transparent)}
+table.pt thead th:nth-child(5n+1){--tc:#2fb68e}table.pt thead th:nth-child(5n+2){--tc:#d9a35f}table.pt thead th:nth-child(5n+3){--tc:#e0708c}table.pt thead th:nth-child(5n+4){--tc:#8b7cf6}table.pt thead th:nth-child(5n+5){--tc:#38b2c8}
+table.pt tbody td{padding:11px 18px;height:48px;box-sizing:border-box;color:var(--text);border-bottom:1px solid var(--line);vertical-align:middle}
+table.pt tbody tr:last-child td{border-bottom:0}
+table.pt tbody tr{transition:background .15s}
+table.pt tbody tr:hover{background:linear-gradient(90deg,var(--tone-soft),transparent 88%)}
+table.pt tbody td:first-child{position:relative;font-weight:650}
+table.pt tbody td:first-child::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:var(--tone);opacity:.4;transition:all .18s}
+table.pt tbody tr:hover td:first-child::before{opacity:1;top:0;bottom:0}
+table.pt td.num,table.pt th.num{text-align:right}
+.pt-foot{display:flex;align-items:center;gap:9px;padding:8px 16px;border:1px solid var(--line-strong);border-radius:0 0 14px 14px;background:var(--panel-2);font:600 10.5px/1 ui-monospace,Consolas,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.pt-foot i{width:6px;height:6px;border-radius:50%;background:var(--tone)}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:3px 11px 3px 9px;border-radius:999px;font:700 10.5px/1.3 Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;white-space:nowrap;color:var(--p);background:color-mix(in srgb,var(--p) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--p) 40%,transparent)}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.good{--p:var(--ok)}.pill.warn{--p:var(--warn)}.pill.bad{--p:var(--bad)}.pill.info{--p:#38b2c8}.pill.mute{--p:var(--muted)}
+.bar{display:flex;align-items:center;gap:10px;min-width:120px}.bar-t{flex:1;height:6px;border-radius:6px;background:var(--line-strong);overflow:hidden}.bar-f{height:100%;border-radius:6px;background:var(--tone)}.bar-n{min-width:46px;text-align:right;font-weight:700;font-size:12.5px}
+pre.codebox{margin:0;padding:16px 18px;border-radius:12px;border:1px solid var(--line-strong);border-left:3px solid var(--tone);background:var(--panel-3);color:var(--text);font:12.5px/1.6 'JetBrains Mono',Consolas,monospace;overflow:auto;max-height:420px}
+.foot{text-align:center;color:var(--muted);font-size:11px;padding-top:22px;letter-spacing:.08em}
+@media(prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+'''
+
+# per-item colours + icons for the capsule nav and the sidebar
+_ICONS = {
+    "grid": "<rect x='3' y='3' width='7' height='9' rx='1.5'/><rect x='14' y='3' width='7' height='5' rx='1.5'/><rect x='14' y='12' width='7' height='9' rx='1.5'/><rect x='3' y='16' width='7' height='5' rx='1.5'/>",
+    "chip": "<rect x='6' y='6' width='12' height='12' rx='2'/><path d='M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4'/>",
+    "bolt": "<path d='M13 2L4 14h7l-1 8 9-12h-7z'/>",
+    "flask": "<path d='M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3'/>",
+    "shield": "<path d='M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'/><path d='M9 12l2 2 4-4'/>",
+    "info": "<circle cx='12' cy='12' r='9'/><path d='M12 11v5M12 8h.01'/>",
+}
+_NAV_ICON = {"Overview": "grid", "Forecast": "chip", "Dispatch": "bolt", "Scenarios": "flask",
+             "Assets & Alerts": "shield", "Model Notes": "info"}
 
 
+def _mask(icon):
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' "
+           "stroke-linecap='round' stroke-linejoin='round'>" + _ICONS[icon] + "</svg>")
+    return 'url("data:image/svg+xml,' + _up.quote(svg, safe="/:=' ()") + '")'
+
+
+_rules = []
+for _i, _n in enumerate(NAV, start=1):
+    _sel = '.stApp .st-key-topnav [role="radiogroup"]>:nth-child(' + str(_i) + ")"
+    _m = _mask(_NAV_ICON[_n])
+    _rules.append(f"{_sel}{{--c:{TONES[_n]}}}")
+    _rules.append(f"{_sel} p::before{{-webkit-mask-image:{_m};mask-image:{_m}}}")
+_SB = {  # key -> (panel, group colour)
+    "nav_overview": "Overview", "nav_forecast": "Forecast", "nav_dispatch": "Dispatch",
+    "nav_scenarios": "Scenarios", "nav_assets": "Assets & Alerts", "nav_notes": "Model Notes",
+}
+for _k, _p in _SB.items():
+    _m = _mask(_NAV_ICON[_p])
+    _s = f'.stApp [data-testid="stSidebar"] .st-key-{_k}'
+    _rules.append(f"{_s}{{--c:{TONES[_p]}}}")
+    _rules.append(f"{_s} button p::before{{-webkit-mask-image:{_m};mask-image:{_m}}}")
+
+st.markdown("<style>" + _root + STATIC_CSS + "".join(_rules) + "</style>", unsafe_allow_html=True)
+
+# ====================== helpers ======================
+class Raw(str):
+    """Pre-built, trusted HTML cell."""
+
+
+def esc(x):
+    return html.escape(str(x))
+
+
+def pill(text, kind="mute"):
+    return Raw(f"<span class='pill {kind}'>{esc(text)}</span>")
+
+
+def bar(pct, label=None):
+    pct = max(0.0, min(100.0, float(pct)))
+    return Raw(f"<div class='bar'><div class='bar-t'><div class='bar-f' style='width:{pct:.0f}%'></div></div>"
+               f"<span class='bar-n'>{esc(label if label is not None else f'{pct:.0f}%')}</span></div>")
+
+
+def table(headers, rows, num_cols=(), max_h=None, foot=None):
+    th = "".join(f"<th class='{'num' if i in num_cols else ''}'>{esc(h)}</th>" for i, h in enumerate(headers))
+    body = ""
+    for r in rows:
+        body += "<tr>" + "".join(
+            f"<td class='{'num' if i in num_cols else ''}'>{c if isinstance(c, Raw) else esc(c)}</td>" for i, c in enumerate(r)
+        ) + "</tr>"
+    style = f" style='max-height:{int(max_h)}px'" if max_h else ""
+    f = foot if foot is not None else f"{len(rows)} rows"
+    st.markdown(f"<div class='pt-shell'><div class='pt-wrap'{style}><table class='pt'><thead><tr>{th}</tr></thead>"
+                f"<tbody>{body}</tbody></table></div><div class='pt-foot'><i></i>{esc(f)}</div></div>",
+                unsafe_allow_html=True)
+
+
+def banner(step, title, sub, scope):
+    st.markdown(f"<div class='part-banner'><div><div class='pb-step'>{esc(step)}</div><div class='pb-title'>{esc(title)}</div>"
+                f"<div class='pb-sub'>{esc(sub)}</div></div><div class='pb-scope'>{esc(scope)}</div></div>", unsafe_allow_html=True)
+
+
+def section(title, sub=""):
+    s = f"<div class='sh-sub'>{esc(sub)}</div>" if sub else ""
+    st.markdown(f"<div class='sec-head'><div class='sh-title'>{esc(title)}</div>{s}</div>", unsafe_allow_html=True)
+
+
+def kpis(items):
+    cols = [TONE, "#4da3ff", "#a78bfa", "#3ddc97", "#f5b14a"] if DARK else [TONE, "#0070f3", "#7c5ce6", "#0f9a73", "#c47f00"]
+    h = "<div class='kpi-grid'>"
+    for i, (lab, val, foot) in enumerate(items):
+        h += (f"<div class='kpi' style='--k:{cols[i % 5]}'><div class='kpi-l'>{esc(lab)}</div>"
+              f"<div class='kpi-v'>{esc(val)}</div><div class='kpi-f'>{esc(foot)}</div></div>")
+    st.markdown(h + "</div>", unsafe_allow_html=True)
+
+
+def stat_card(eyebrow, title, detail, color):
+    st.markdown(f"<div class='stat-card' style='--sc:{color}'><div class='e'>{esc(eyebrow)}</div>"
+                f"<div class='t'>{esc(title)}</div><div class='d'>{esc(detail)}</div></div>", unsafe_allow_html=True)
+
+
+def chart(fig, height=330, legend=True, title=None):
+    fig.update_layout(
+        height=height, paper_bgcolor=TOK["panel"], plot_bgcolor=TOK["panel"], font=dict(color=TOK["text"], size=12),
+        title=dict(text=title, font=dict(size=13, color=TOK["text"]), x=0.01, xanchor="left") if title else None,
+        margin=dict(l=18, r=18, t=46 if title else 22, b=24), hovermode="x unified",
+        hoverlabel=dict(bgcolor=TOK["panel2"], bordercolor=TOK["line2"], font_color=TOK["text"]),
+        legend=dict(orientation="h", y=-0.2, x=0, bgcolor="rgba(0,0,0,0)") if legend else dict(visible=False),
+        xaxis=dict(gridcolor=TOK["line"], zerolinecolor=TOK["line2"], showline=False),
+        yaxis=dict(gridcolor=TOK["line"], zerolinecolor=TOK["line2"], showline=False),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False, "modeBarButtonsToRemove": ["lasso2d", "select2d"]})
+
+
+def litres(kwh):
+    return kwh / C.KWH_PER_LITRE_DIESEL
+
+
+def go_to(panel):
+    st.session_state["active_panel"] = panel
+    st.rerun()
+
+
+# ====================== data ======================
 @st.cache_data(show_spinner="Generating the polar station simulation…")
 def load_data():
     return generate_year()
 
 
 @st.cache_data(show_spinner="Training load forecast…")
-def get_forecast(_df):
-    return forecast_load(_df)
+def get_forecast():
+    return forecast_load(load_data())
+
 
 @st.cache_data(show_spinner="Optimising energy dispatch…")
 def get_dispatch(start, hours):
     d = load_data().iloc[start:start + hours]
-    dispatch, status = optimize_dispatch(d.load_kw, d.solar_kw, d.wind_kw)
-    dispatch.index = d.index
-    return dispatch, status
-
-def litres(kwh):
-    return kwh / C.KWH_PER_LITRE_DIESEL
-
-def co2(kwh):
-    return litres(kwh) * C.CO2_KG_PER_LITRE_DIESEL
-
-def chart_layout(fig, height=330, legend=True):
-    fig.update_layout(
-        height=height, paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT, size=12),
-        title_font=dict(size=13, color=TEXT), title_x=0.01,
-        hoverlabel=dict(bgcolor=PANEL_2, bordercolor=BORDER, font_color=TEXT),
-        margin=dict(l=18, r=18, t=44, b=24), hovermode="x unified",
-        legend=dict(orientation="h", y=-0.18, x=0, bgcolor="rgba(0,0,0,0)") if legend else dict(visible=False),
-        xaxis=dict(gridcolor=GRID, zerolinecolor=BORDER, showline=False),
-        yaxis=dict(gridcolor=GRID, zerolinecolor=BORDER, showline=False),
-    )
-    return fig
-
-def section(label):
-    st.markdown(f'<div class="section-head"><span class="section-dot"></span><span class="smallcaps">{label}</span></div>', unsafe_allow_html=True)
+    out, status = optimize_dispatch(d.load_kw, d.solar_kw, d.wind_kw)
+    out.index = d.index
+    return out, status
 
 
-# ---------- Dataset and forecast ----------
 df = load_data()
-
-scenarios = {
-    "SUMMER / MIDNIGHT SUN": pd.Timestamp(f"{C.SIM_YEAR}-01-10"),
-    "POLAR NIGHT / JULY": pd.Timestamp(f"{C.SIM_YEAR}-07-10"),
-    "SHOULDER SEASON / APRIL": pd.Timestamp(f"{C.SIM_YEAR}-04-10"),
+SCENARIOS = {
+    "Summer / midnight sun": pd.Timestamp(f"{C.SIM_YEAR}-01-10"),
+    "Polar night / July": pd.Timestamp(f"{C.SIM_YEAR}-07-10"),
+    "Shoulder season / April": pd.Timestamp(f"{C.SIM_YEAR}-04-10"),
 }
 
-# Primary controls live on the main canvas, not inside a collapsible sidebar.
-# This keeps them usable even when the sidebar is minimized by the user.
+# ====================== sidebar ======================
+def nav_btn(label, key, panel):
+    if st.button(label, key=key, use_container_width=True, type="primary" if PANEL == panel else "secondary"):
+        go_to(panel)
+
+
+def group(label, color):
+    st.markdown(f"<div class='sidebar-group-label' style='--g:{color}'>{esc(label)}</div>", unsafe_allow_html=True)
+
+
 with st.sidebar:
-    st.markdown("<div class='smallcaps'>POLAR EMS · CONTROL</div>", unsafe_allow_html=True)
-    st.markdown("## Station operations")
-    st.caption("SIH26061 · Polar research microgrid")
-    st.markdown("---")
-    st.markdown("**System configuration**")
-    st.caption(f"PV · {C.PV_CAPACITY_KW:.0f} kW installed")
-    st.caption(f"Wind · {C.WIND_CAPACITY_KW:.0f} kW installed")
-    st.caption(f"Battery · {C.BATTERY_CAPACITY_KWH:.0f} kWh")
-    st.caption(f"Diesel · {C.DIESEL_CAPACITY_KW:.0f} kW backup")
-    st.markdown("---")
-    st.caption("DEMO MODE · Deterministic simulation")
-    st.caption("No live station telemetry")
+    st.markdown("<div class='sidebar-brand-v2'><div class='brand-mark'>❄️</div><div><div class='brand-name'>POLAR EMS</div>"
+                "<div class='brand-role'>Station microgrid console</div></div></div>", unsafe_allow_html=True)
+    nav_btn("Overview", "nav_overview", "Overview")
+    group("Operations", TONES["Forecast"])
+    nav_btn("Forecast", "nav_forecast", "Forecast")
+    nav_btn("Dispatch", "nav_dispatch", "Dispatch")
+    group("Analysis", TONES["Scenarios"])
+    nav_btn("Scenarios", "nav_scenarios", "Scenarios")
+    nav_btn("Assets & Alerts", "nav_assets", "Assets & Alerts")
+    group("System", TONES["Model Notes"])
+    nav_btn("Model Notes", "nav_notes", "Model Notes")
+    st.markdown(
+        f"<div class='sb-status'><span class='dot'></span><div class='sb-stat'><b>{C.PV_CAPACITY_KW + C.WIND_CAPACITY_KW:.0f} kW</b><i>Renewables</i></div>"
+        f"<div class='sb-stat'><b>{C.BATTERY_CAPACITY_KWH:.0f} kWh</b><i>Battery</i></div></div>"
+        f"<div class='sb-prof'><div class='av'>🧊</div><div><b>Simulation mode</b><i>Seed {C.RANDOM_SEED} · no live SCADA</i></div></div>",
+        unsafe_allow_html=True)
 
-with st.container(border=True):
-    control_scenario, control_days, control_note = st.columns([2.2, 1.4, 1.6])
-    scenario = control_scenario.selectbox("Operating scenario", list(scenarios), key="main_scenario")
-    days = control_days.slider("Dispatch window", 2, 14, 7, 1, format="%d days", key="main_days")
-    control_note.markdown(f"<div class='chips' style='padding-top:28px'><span class='chip'>{days} DAYS</span><span class='chip'>SIMULATED DATA</span></div>", unsafe_allow_html=True)
+# ====================== top banner + nav ======================
+st.markdown(
+    f"""<div class="topbar-shell"><div class="topbar-brand"><div class="topbar-logo">❄️</div><div>
+<div class="topbar-kicker"><span class="tb-brand">POLAR EMS</span><span class="tb-sep"></span><span>SIH 2026 · SIH26061</span></div>
+<div class="topbar-title">Research-Station Energy Operations</div></div></div>
+<div class="topbar-status-wrap"><div class="topbar-chip">{C.LATITUDE_DEG:.0f}° latitude · {C.SIM_YEAR}</div>
+<div class="topbar-chip ok"><span class="topbar-dot"></span>Simulation online</div></div>
+<div class="topbar-subtitle"><span class="tb-tag">Load forecasting</span><span class="tb-tag">LP dispatch</span><span class="tb-tag">Renewable integration</span><span class="tb-tag">Battery health</span><span class="tb-tag">Stress testing</span><span class="tb-tag">Run provenance</span></div></div>""",
+    unsafe_allow_html=True)
 
-start = int(df.index.get_loc(scenarios[scenario]))
+with st.container(key="topnav"):
+    st.radio("Workflow", NAV, key="active_panel", horizontal=True, label_visibility="collapsed")
+PANEL = st.session_state["active_panel"]
+TONE = TONES.get(PANEL, TONE)
+st.markdown(f"<style>html body .stApp{{--tone:{TONE};--tone-soft:color-mix(in srgb,{TONE} 14%,transparent)}}</style>", unsafe_allow_html=True)
+
+# ====================== controls + shared run ======================
+with st.container(key="ctl_card"):
+    c1, c2, c3 = st.columns([2.2, 1.4, 1.6])
+    scenario = c1.selectbox("Operating scenario", list(SCENARIOS), key="main_scenario")
+    days = c2.slider("Dispatch window", 2, 14, 7, 1, format="%d days", key="main_days")
+    c3.markdown(f"<div class='chips' style='padding-top:28px'><span class='chip'>{days} DAYS</span><span class='chip'>SIMULATED</span></div>", unsafe_allow_html=True)
+
+start = int(df.index.get_loc(SCENARIOS[scenario]))
 disp, solver_status = get_dispatch(start, days * 24)
-res, mae = get_forecast(df)
-mape = float((np.abs(res.load_actual - res.load_pred) / res.load_actual.clip(lower=1)).mean() * 100)
-
-# Centralized, validated domain metrics. All panels and exports consume this object.
 ops = calculate_metrics(disp, solver_status)
-run_manifest = build_run_manifest(disp, scenario, solver_status)
-operational_alerts = build_operational_alerts(ops)
-load_energy = ops.load_kwh
-diesel_kwh = ops.diesel_kwh
-base_kwh = ops.baseline_diesel_kwh
-saved_kwh = max(0.0, base_kwh - diesel_kwh)
-renewable_kwh = ops.renewable_kwh
-renew_share = ops.renewable_share_pct
-avg_load = ops.average_load_kw
-peak_load = ops.peak_load_kw
-soc_now = ops.ending_soc_kwh
-soc_pct = ops.ending_soc_pct
+manifest = build_run_manifest(disp, scenario, solver_status)
+alerts = build_operational_alerts(ops)
+saved_kwh = max(0.0, ops.baseline_diesel_kwh - ops.diesel_kwh)
+MIX = [("Solar", "solar_used", SOLAR), ("Wind", "wind_used", WINDC), ("Battery", "discharge_kw", BATT), ("Diesel", "diesel_kw", DIESEL)]
 
-def kpi(label, value, foot):
-    return f"<div class='kpi'><div class='kpi-l'>{label}</div><div class='kpi-v'>{value}</div><div class='kpi-f'>{foot}</div></div>"
+# ====================== pages ======================
+if PANEL == "Overview":
+    banner("01 · Overview", "Station energy at a glance", "Supply mix, fuel and battery reserve for the selected window.", f"{scenario} · {days} days")
+    kpis([
+        ("Station demand", f"{ops.average_load_kw:.1f} kW", f"Peak {ops.peak_load_kw:.1f} kW"),
+        ("Diesel consumed", f"{ops.diesel_litres:,.0f} L", f"{ops.diesel_kwh:,.0f} kWh in window"),
+        ("Renewable share", f"{ops.renewable_share_pct:.1f}%", f"{ops.renewable_kwh:,.0f} kWh supplied"),
+        ("Fuel avoided", f"{litres(saved_kwh):,.0f} L", f"{(saved_kwh / ops.baseline_diesel_kwh * 100 if ops.baseline_diesel_kwh else 0):.1f}% vs no-battery baseline"),
+        ("Battery reserve", f"{ops.ending_soc_pct:.0f}%", f"{ops.ending_soc_kwh:.0f} / {C.BATTERY_CAPACITY_KWH:.0f} kWh"),
+    ])
+    section("Power flow", "Energy delivered by each source during the window")
+    flow = [("SOLAR", f"{disp.solar_used.sum():,.0f} kWh", f"Peak available {disp.solar_avail.max():.1f} kW", SOLAR),
+            ("WIND", f"{disp.wind_used.sum():,.0f} kWh", f"Peak available {disp.wind_avail.max():.1f} kW", WINDC),
+            ("BATTERY", f"{ops.battery_discharge_kwh:,.0f} kWh", f"Ends at {ops.ending_soc_pct:.0f}%", BATT),
+            ("DIESEL", f"{ops.diesel_kwh:,.0f} kWh", f"Active {ops.diesel_active_hours} h", DIESEL),
+            ("STATION LOAD", f"{ops.load_kwh:,.0f} kWh", f"Average {ops.average_load_kw:.1f} kW", TOK["text"])]
+    h = "<div class='flow-wrap'>"
+    for i, (n, v, f, col) in enumerate(flow):
+        h += f"<div class='flow-card' style='--fc:{col}'><div class='label'>{n}</div><div class='value'>{v}</div><div class='foot'>{f}</div></div>"
+        if i < len(flow) - 1:
+            h += "<div class='flow-arrow'>›</div>"
+    st.markdown(h + "</div>", unsafe_allow_html=True)
 
-st.markdown("<div class='kpi-grid'>" + "".join([
-    kpi("Station demand", f"{avg_load:.1f} kW", f"Peak {peak_load:.1f} kW"),
-    kpi("Diesel consumed", f"{litres(diesel_kwh):,.0f} L", f"{diesel_kwh:,.0f} kWh in window"),
-    kpi("Renewable contribution", f"{renew_share:.1f}%", f"{renewable_kwh:,.0f} kWh supplied"),
-    kpi("Fuel avoided", f"{litres(saved_kwh):,.0f} L", f"{(saved_kwh/base_kwh*100 if base_kwh else 0):.1f}% vs baseline"),
-    kpi("Battery reserve", f"{soc_pct:.0f}%", f"{soc_now:.0f} / {C.BATTERY_CAPACITY_KWH:.0f} kWh"),
-]) + "</div>", unsafe_allow_html=True)
-
-alerts = operational_alerts
-diesel_hours = ops.diesel_active_hours
-
-# Main app navigation
-nav = st.tabs(["OVERVIEW", "FORECAST", "DISPATCH", "ASSETS & ALERTS", "MODEL NOTES"])
-with nav[0]:
-    section("POWER FLOW · SELECTED SCENARIO")
-    # Data-driven flow summary: actual energy in selected dispatch window.
-    solar = float(disp.solar_used.sum())
-    wind = float(disp.wind_used.sum())
-    battery = float(disp.discharge_kw.sum())
-    diesel = float(disp.diesel_kw.sum())
-    flow_items = [
-        ("SOLAR", f"{solar:,.0f} kWh", f"Peak available {disp.solar_avail.max():.1f} kW", "#F4C75A"),
-        ("WIND", f"{wind:,.0f} kWh", f"Peak available {disp.wind_avail.max():.1f} kW", BLUE),
-        ("BATTERY", f"{battery:,.0f} kWh", f"Reserve at end {soc_pct:.0f}%", GREEN),
-        ("DIESEL", f"{diesel:,.0f} kWh", f"Generator active {diesel_hours} h", AMBER),
-        ("STATION LOAD", f"{load_energy:,.0f} kWh", f"Average {avg_load:.1f} kW", CYAN),
-    ]
-    html = '<div class="flow-wrap">'
-    for i, (name, value, foot, color) in enumerate(flow_items):
-        html += f'<div class="flow-card"><div class="label">{name}</div><div class="value" style="color:{color}">{value}</div><div class="foot">{foot}</div></div>'
-        if i < len(flow_items)-1:
-            html += '<div class="flow-arrow">›</div>'
-    html += '</div>'
-    st.markdown(html, unsafe_allow_html=True)
-
-    left, right = st.columns([1.65, 1])
+    section("Supply vs demand", "Hourly dispatch stack against station load")
+    left, right = st.columns([1.7, 1])
     with left:
-        section("ENERGY MIX · HOURLY")
         fig = go.Figure()
-        mix_colors = [("Solar", "solar_used", "#F4C75A"), ("Wind", "wind_used", BLUE), ("Battery", "discharge_kw", GREEN), ("Diesel", "diesel_kw", AMBER)]
-        for name, key, color in mix_colors:
-            fig.add_trace(go.Scatter(x=disp.index, y=disp[key], name=name, stackgroup="supply", mode="lines", line=dict(width=0.8, color=color), hovertemplate=f"{name}: %{{y:.1f}} kW<extra></extra>"))
-        fig.add_trace(go.Scatter(x=disp.index, y=disp.load_kw, name="Demand", mode="lines", line=dict(color=TEXT, width=2.3), hovertemplate="Demand: %{y:.1f} kW<extra></extra>"))
-        fig.update_layout(title="Power supply vs station demand", yaxis_title="Power (kW)")
-        st.plotly_chart(chart_layout(fig, 350), use_container_width=True)
+        for name, key, col in MIX:
+            fig.add_trace(go.Scatter(x=disp.index, y=disp[key], name=name, stackgroup="s", mode="lines", line=dict(width=.8, color=col),
+                                     hovertemplate=f"{name}: %{{y:.1f}} kW<extra></extra>"))
+        fig.add_trace(go.Scatter(x=disp.index, y=disp.load_kw, name="Demand", line=dict(color=TOK["text"], width=2.2),
+                                 hovertemplate="Demand: %{y:.1f} kW<extra></extra>"))
+        fig.update_yaxes(title="Power (kW)")
+        chart(fig, 360, title="Power supply vs station demand")
     with right:
-        section("BATTERY RESERVE")
-        fig_soc = go.Figure(go.Indicator(mode="gauge+number", value=soc_pct, number={"suffix":"%", "font":{"color":TEXT,"size":34}}, gauge={"axis":{"range":[0,100],"tickcolor":MUTED},"bar":{"color":GREEN},"bgcolor":PANEL,"bordercolor":BORDER,"steps":[{"range":[0,C.BATTERY_MIN_SOC_FRAC*100],"color":"rgba(229,72,77,.22)"},{"range":[C.BATTERY_MIN_SOC_FRAC*100,100],"color":PANEL_2}],"threshold":{"line":{"color":AMBER,"width":3},"thickness":0.8,"value":C.BATTERY_MIN_SOC_FRAC*100}}))
-        fig_soc.update_layout(height=260, paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT), margin=dict(t=20,b=15,l=10,r=10))
-        st.plotly_chart(fig_soc, use_container_width=True)
-        st.caption(f"Minimum reserve: {C.BATTERY_MIN_SOC_FRAC*100:.0f}% · Capacity: {C.BATTERY_CAPACITY_KWH:.0f} kWh")
-        section("DISPATCH ENGINE")
-        solver_color = GREEN if solver_status == "Optimal" else AMBER
-        st.markdown(f"<div class='flow-card'><div class='label'>SOLVER STATUS</div><div class='value' style='color:{solver_color};font-size:18px'>{solver_status}</div><div class='foot'>Selected {days}-day window · {len(disp)} hourly steps</div></div>", unsafe_allow_html=True)
+        g = go.Figure(go.Indicator(mode="gauge+number", value=ops.ending_soc_pct, number=dict(suffix="%", font=dict(color=TOK["text"], size=34)),
+                                   gauge=dict(axis=dict(range=[0, 100], tickcolor=TOK["muted"]), bar=dict(color=BATT), bgcolor=TOK["panel2"], bordercolor=TOK["line2"],
+                                              steps=[dict(range=[0, C.BATTERY_MIN_SOC_FRAC * 100], color="rgba(214,51,77,.28)")],
+                                              threshold=dict(line=dict(color=DIESEL, width=3), thickness=.8, value=C.BATTERY_MIN_SOC_FRAC * 100))))
+        g.update_layout(height=250, paper_bgcolor=TOK["panel"], font=dict(color=TOK["text"]), margin=dict(t=30, b=10, l=16, r=16),
+                        title=dict(text="Battery reserve", font=dict(size=13, color=TOK["text"]), x=.02))
+        st.plotly_chart(g, use_container_width=True, config={"displayModeBar": False})
+        stat_card("Dispatch engine", solver_status, f"{len(disp)} hourly steps · LP with deterministic fallback", TOK["ok"] if solver_status == "Optimal" else TOK["warn"])
 
-    section("WINDOW SUMMARY")
+    section("Daily contribution")
     daily = disp.resample("D").sum(numeric_only=True)
-    fig_daily = go.Figure()
-    for name, key, color in mix_colors:
-        fig_daily.add_bar(x=daily.index, y=daily[key], name=name, marker_color=color)
-    fig_daily.update_layout(barmode="stack", title="Daily energy contribution", yaxis_title="Energy (kWh)")
-    st.plotly_chart(chart_layout(fig_daily, 290), use_container_width=True)
-
-    st.download_button("Download dispatch data (CSV)", disp.to_csv().encode("utf-8"), file_name="polar_ems_dispatch.csv", mime="text/csv")
+    fd = go.Figure()
+    for name, key, col in MIX:
+        fd.add_bar(x=daily.index, y=daily[key], name=name, marker_color=col)
+    fd.update_layout(barmode="stack")
+    fd.update_yaxes(title="Energy (kWh)")
+    chart(fd, 300, title="Daily energy contribution")
+    d1, d2, _ = st.columns([1.2, 1.2, 3])
+    d1.download_button("Dispatch CSV", disp.to_csv().encode(), "polar_ems_dispatch.csv", "text/csv", use_container_width=True)
+    d2.download_button("Report (Markdown)", export_report(ops, alerts, manifest), "polar_ems_report.md", "text/markdown", use_container_width=True)
     with st.expander("Run provenance"):
-        st.json(run_manifest)
+        st.markdown(f"<pre class='codebox'>{esc(json.dumps(manifest, indent=2))}</pre>", unsafe_allow_html=True)
 
-with nav[1]:
-    section("LOAD FORECAST · HELD-OUT TEST PERIOD")
-    st.markdown("Model trained on earlier simulated data and evaluated on the final 30-day window.")
-    a,b,c = st.columns(3)
-    a.metric("Mean absolute error", f"{mae:.2f} kW")
-    b.metric("MAPE", f"{mape:.2f}%")
-    c.metric("Test window", f"{len(res):,} hours")
-    figf = go.Figure()
-    figf.add_trace(go.Scatter(x=res.index, y=res.load_actual, name="Actual demand", line=dict(color=CYAN,width=1.6), fill="tozeroy", fillcolor="rgba(57,214,232,.08)"))
-    figf.add_trace(go.Scatter(x=res.index, y=res.load_pred, name="Predicted demand", line=dict(color=AMBER,width=1.7,dash="dot")))
-    figf.update_layout(title="Actual demand and model prediction", yaxis_title="Load (kW)")
-    st.plotly_chart(chart_layout(figf, 410), use_container_width=True)
-    errors = res.load_actual-res.load_pred
-    n_bins = 30
-    figerr = go.Figure(go.Histogram(x=errors, nbinsx=n_bins, marker_color=BLUE, name="Forecast error"))
-    figerr.update_layout(title="Forecast error distribution", xaxis_title="Actual − predicted (kW)", yaxis_title="Frequency")
-    st.plotly_chart(chart_layout(figerr, 260, legend=False), use_container_width=True)
-    with st.expander("Forecast methodology"):
-        st.markdown("Gradient-boosted regression uses cyclical calendar features, temperature, 24-hour and 168-hour load lags, and a rolling 24-hour mean. The final 30 days are held out from training.")
+elif PANEL == "Forecast":
+    res, mae = get_forecast()
+    mape = float((np.abs(res.load_actual - res.load_pred) / res.load_actual.clip(lower=1)).mean() * 100)
+    banner("02 · Forecast", "AI load forecasting", "Gradient-boosted model scored on a held-out 30-day window.", "Held-out test period")
+    kpis([("Mean absolute error", f"{mae:.2f} kW", "Lower is better"), ("MAPE", f"{mape:.2f}%", "Mean absolute % error"),
+          ("Test window", f"{len(res):,} h", "Final 30 days, never trained on"),
+          ("Peak actual", f"{res.load_actual.max():.1f} kW", "In test window"), ("Peak predicted", f"{res.load_pred.max():.1f} kW", "In test window")])
+    ff = go.Figure()
+    ff.add_trace(go.Scatter(x=res.index, y=res.load_actual, name="Actual", line=dict(color=TONE, width=1.6), fill="tozeroy", fillcolor="rgba(120,140,255,.08)"))
+    ff.add_trace(go.Scatter(x=res.index, y=res.load_pred, name="Predicted", line=dict(color=DIESEL, width=1.7, dash="dot")))
+    ff.update_yaxes(title="Load (kW)")
+    chart(ff, 410, title="Actual demand vs model prediction")
+    err = res.load_actual - res.load_pred
+    fe = go.Figure(go.Histogram(x=err, nbinsx=30, marker_color=WINDC))
+    fe.update_xaxes(title="Actual − predicted (kW)"); fe.update_yaxes(title="Frequency")
+    chart(fe, 260, legend=False, title="Forecast error distribution")
+    with st.expander("Methodology"):
+        st.markdown("Gradient-boosted regression on cyclical calendar features, temperature, 24 h and 168 h load lags and a rolling 24 h mean. The final 30 days are held out from training.")
 
-with nav[2]:
-    section("OPTIMISED ENERGY DISPATCH")
-    figd = go.Figure()
-    figd.add_trace(go.Scatter(x=disp.index, y=disp.load_kw, name="Station demand", line=dict(color=TEXT,width=2.2)))
-    figd.add_trace(go.Scatter(x=disp.index, y=disp.solar_avail, name="Solar available", line=dict(color="#F4C75A",width=1.4,dash="dot")))
-    figd.add_trace(go.Scatter(x=disp.index, y=disp.wind_avail, name="Wind available", line=dict(color=BLUE,width=1.4,dash="dot")))
-    figd.update_layout(title="Demand and renewable availability", yaxis_title="Power (kW)")
-    st.plotly_chart(chart_layout(figd, 340), use_container_width=True)
-    figbat = go.Figure()
-    figbat.add_trace(go.Scatter(x=disp.index, y=disp.soc_kwh, name="Battery energy", line=dict(color=GREEN,width=2), fill="tozeroy", fillcolor="rgba(70,214,162,.12)"))
-    figbat.add_hline(y=C.BATTERY_MIN_SOC_FRAC*C.BATTERY_CAPACITY_KWH, line_dash="dash", line_color=AMBER, annotation_text="Reserve floor")
-    figbat.add_hline(y=C.BATTERY_CAPACITY_KWH, line_dash="dot", line_color=MUTED, annotation_text="Capacity")
-    figbat.update_layout(title="Battery state-of-charge trajectory", yaxis_title="Stored energy (kWh)")
-    st.plotly_chart(chart_layout(figbat, 320, legend=False), use_container_width=True)
-    detail = disp.copy()
-    detail.index.name = "timestamp"
-    st.dataframe(detail.round(2), use_container_width=True, height=300)
-    st.download_button("Export detailed dispatch", detail.to_csv().encode("utf-8"), "polar_dispatch_detail.csv", "text/csv")
+elif PANEL == "Dispatch":
+    banner("03 · Dispatch", "Optimised energy dispatch", "Renewables first, battery second, diesel last.", f"{scenario} · {days} days")
+    f1 = go.Figure()
+    f1.add_trace(go.Scatter(x=disp.index, y=disp.load_kw, name="Demand", line=dict(color=TOK["text"], width=2.2)))
+    f1.add_trace(go.Scatter(x=disp.index, y=disp.solar_avail, name="Solar available", line=dict(color=SOLAR, width=1.4, dash="dot")))
+    f1.add_trace(go.Scatter(x=disp.index, y=disp.wind_avail, name="Wind available", line=dict(color=WINDC, width=1.4, dash="dot")))
+    f1.update_yaxes(title="Power (kW)")
+    chart(f1, 340, title="Demand and renewable availability")
+    f2 = go.Figure(go.Scatter(x=disp.index, y=disp.soc_kwh, name="Battery", line=dict(color=BATT, width=2), fill="tozeroy", fillcolor="rgba(61,220,151,.12)"))
+    f2.add_hline(y=C.BATTERY_MIN_SOC_FRAC * C.BATTERY_CAPACITY_KWH, line_dash="dash", line_color=DIESEL, annotation_text="Reserve floor")
+    f2.add_hline(y=C.BATTERY_CAPACITY_KWH, line_dash="dot", line_color=TOK["muted"], annotation_text="Capacity")
+    f2.update_yaxes(title="Stored energy (kWh)")
+    chart(f2, 320, legend=False, title="Battery state-of-charge")
+    section("Hourly dispatch log", "First 168 hours of the window")
+    rows = []
+    for ts, r in disp.head(168).iterrows():
+        rows.append([ts.strftime("%d %b %H:%M"), f"{r.load_kw:.1f}", f"{r.solar_used:.1f}", f"{r.wind_used:.1f}", f"{r.discharge_kw:.1f}",
+                     f"{r.charge_kw:.1f}", pill(f"{r.diesel_kw:.1f} kW", "warn") if r.diesel_kw > .1 else pill("Off", "good"),
+                     bar(r.soc_kwh / C.BATTERY_CAPACITY_KWH * 100)])
+    table(["Time", "Load kW", "Solar kW", "Wind kW", "Discharge kW", "Charge kW", "Diesel", "Battery"], rows, num_cols=(1, 2, 3, 4, 5), max_h=420,
+          foot=f"{min(168, len(disp))} of {len(disp)} hours")
+    st.download_button("Export full dispatch (CSV)", disp.to_csv().encode(), "polar_dispatch_detail.csv", "text/csv")
 
-with nav[3]:
-    section("ASSET STATUS · CONFIGURED SYSTEM")
-    assets = [
-        ("Solar PV array", f"{C.PV_CAPACITY_KW:.0f} kW", f"Peak available {disp.solar_avail.max():.1f} kW", "GENERATION", "#F4C75A"),
-        ("Wind turbine system", f"{C.WIND_CAPACITY_KW:.0f} kW", f"Peak available {disp.wind_avail.max():.1f} kW", "GENERATION", BLUE),
-        ("Battery storage", f"{C.BATTERY_CAPACITY_KWH:.0f} kWh", f"Current simulation endpoint {soc_pct:.0f}%", "STORAGE", GREEN),
-        ("Diesel genset", f"{C.DIESEL_CAPACITY_KW:.0f} kW", f"Active in {diesel_hours} simulated hours", "BACKUP", AMBER),
-    ]
-    cols = st.columns(2)
-    for idx, (name, capacity, detail_text, category, color) in enumerate(assets):
-        with cols[idx % 2]:
-            st.markdown(f"<div class='flow-card' style='margin-bottom:12px'><div class='label'>{category}</div><div class='value' style='color:{color}'>{capacity}</div><div style='font-weight:650;margin-top:6px'>{name}</div><div class='foot'>{detail_text}</div></div>", unsafe_allow_html=True)
-    section("OPERATIONS / ALERT LOG")
-    for alert in alerts:
-        # Defensive display contract: malformed alert data must never crash the UI.
-        alert = alert if isinstance(alert, dict) else {}
-        severity = alert.get("severity", "notice")
-        severity = severity.lower() if isinstance(severity, str) else "notice"
-        code = str(alert.get("code", "GENERAL"))
-        title = str(alert.get("title", "Operational notice"))
-        detail = str(alert.get("detail", "No additional details provided."))
-        color = {"success": GREEN, "info": BLUE, "warning": AMBER, "notice": RED}.get(severity, MUTED)
-        st.markdown(f"<div class='flow-card' style='margin-bottom:8px;border-left:3px solid {color}'><div class='label' style='color:{color}'>{severity.upper()} · {code}</div><div style='font-weight:650;margin:5px 0'>{title}</div><div class='foot'>{detail}</div></div>", unsafe_allow_html=True)
-    st.caption("Alerts are generated from the selected simulation window; they are not real station alarms.")
-    report_md = export_report(ops, alerts, run_manifest)
-    st.download_button("Download operations report (Markdown)", report_md, file_name="polar_ems_operations_report.md", mime="text/markdown")
-    st.download_button("Download run manifest (JSON)", __import__("json").dumps(run_manifest, indent=2), file_name="polar_ems_run_manifest.json", mime="application/json")
+elif PANEL == "Scenarios":
+    banner("04 · Scenarios", "Stress tests and forecast margin", "What-if load and renewable multipliers, dispatched by the same optimiser.", "Bounded what-if analysis")
+    section("Stress scenario", "Multipliers apply to the selected window")
+    s1, s2, s3, s4 = st.columns([1, 1, 1, 1.2])
+    lf = s1.slider("Load ×", 0.5, 1.8, 1.0, 0.05, key="sc_load")
+    sf = s2.slider("Solar ×", 0.0, 1.5, 1.0, 0.05, key="sc_solar")
+    wf = s3.slider("Wind ×", 0.0, 1.5, 1.0, 0.05, key="sc_wind")
+    label = s4.text_input("Label", value="Custom", key="sc_label")
+    win = df.iloc[start:start + days * 24]
+    b1, b2, _ = st.columns([1.2, 1.2, 3])
+    if b1.button("Run scenario", type="primary", use_container_width=True):
+        try:
+            st.session_state.setdefault("stress_runs", []).append(run_stress_scenario(win, lf, sf, wf, label or "Scenario"))
+        except Exception as exc:  # bounded inputs, but never crash the console
+            st.error(f"Scenario failed: {exc}")
+    if b2.button("Clear results", use_container_width=True):
+        st.session_state["stress_runs"] = []
+    runs = [{"scenario": "Baseline (current window)", "solver_status": solver_status, "load_factor": 1.0, "solar_factor": 1.0, "wind_factor": 1.0,
+             "diesel_litres": ops.diesel_litres, "renewable_share_pct": ops.renewable_share_pct, "ending_soc_pct": ops.ending_soc_pct}] + st.session_state.get("stress_runs", [])
+    section("Results", "Baseline plus every scenario you have run")
+    table(["Scenario", "Load ×", "Solar ×", "Wind ×", "Diesel", "Renewable", "Battery end", "Solver"],
+          [[r["scenario"], f"{r['load_factor']:.2f}", f"{r['solar_factor']:.2f}", f"{r['wind_factor']:.2f}", f"{r['diesel_litres']:,.0f} L",
+            bar(r["renewable_share_pct"], f"{r['renewable_share_pct']:.1f}%"), f"{r['ending_soc_pct']:.0f}%",
+            pill(r["solver_status"], "good" if r["solver_status"] == "Optimal" else "warn")] for r in runs], num_cols=(1, 2, 3, 4))
+    if len(runs) > 1:
+        fr = go.Figure(go.Bar(x=[r["scenario"] for r in runs], y=[r["diesel_litres"] for r in runs], marker_color=[TONE] + [DIESEL] * (len(runs) - 1)))
+        fr.update_yaxes(title="Diesel (L)")
+        chart(fr, 300, legend=False, title="Diesel consumption by scenario")
+    section("Forecast-aware margin", "Dispatch against a conservative load envelope")
+    m1, m2 = st.columns([1.4, 1])
+    margin = m1.slider("Load margin (%)", 0, 25, 5, 1, key="sc_margin")
+    if m2.button("Apply margin", use_container_width=True):
+        mdisp, mstatus = forecast_aware_dispatch(win, float(margin))
+        mm = calculate_metrics(mdisp, mstatus)
+        stat_card("Result", f"{mm.diesel_litres:,.0f} L diesel at +{margin}% load",
+                  f"{mm.diesel_litres - ops.diesel_litres:+,.0f} L vs baseline · renewable {mm.renewable_share_pct:.1f}% · battery end {mm.ending_soc_pct:.0f}% · {mstatus}", TONE)
 
-with nav[4]:
-    section("MODEL / SIMULATION TRANSPARENCY")
-    st.markdown("### Runtime diagnostics")
-    diag = pd.DataFrame(runtime_diagnostics())
-    st.dataframe(diag, hide_index=True, use_container_width=True)
-    cfg_diag = pd.DataFrame(configuration_diagnostics())
-    st.markdown("### Configuration validation")
-    st.dataframe(cfg_diag, hide_index=True, use_container_width=True)
-    st.caption("PuLP is optional at runtime: when unavailable, the optimizer reports fallback status and the report records that fact.")
-    st.markdown("### System assumptions")
-    st.markdown("- **Telemetry:** generated from a reproducible hourly synthetic year (seeded), not a live SCADA feed.\n- **Location model:** 70°S solar geometry; Antarctic polar night and midnight sun emerge from the solar model.\n- **Forecasting:** gradient-boosted regressor with calendar, temperature, and lag features; final 30 days held out.\n- **Dispatch:** PuLP/CBC linear optimization when available; deterministic renewable-first fallback when solver/API fails.\n- **Fuel baseline:** renewables used greedily, no battery; remaining load supplied by diesel. Fuel saving is measured against this baseline.")
-    st.markdown("### Installed capacity")
-    config_table = pd.DataFrame({"Asset / parameter":["PV", "Wind", "Diesel backup", "Battery", "Minimum battery SOC", "Initial battery SOC", "Latitude", "Diesel energy factor", "Diesel CO₂ factor"], "Configured value":[f"{C.PV_CAPACITY_KW:.1f} kW", f"{C.WIND_CAPACITY_KW:.1f} kW", f"{C.DIESEL_CAPACITY_KW:.1f} kW", f"{C.BATTERY_CAPACITY_KWH:.1f} kWh", f"{C.BATTERY_MIN_SOC_FRAC*100:.0f}%", f"{C.BATTERY_INIT_SOC_FRAC*100:.0f}%", f"{C.LATITUDE_DEG:.1f}°", f"{C.KWH_PER_LITRE_DIESEL:.2f} kWh/L", f"{C.CO2_KG_PER_LITRE_DIESEL:.2f} kg/L"]})
-    st.dataframe(config_table, hide_index=True, use_container_width=True)
+elif PANEL == "Assets & Alerts":
+    banner("05 · Assets & Alerts", "Asset status, health and alerts", "Configured capacity, simulated wear estimates and operating alerts.", f"{scenario} · {days} days")
+    section("Installed assets")
+    ac = st.columns(4)
+    for col, (name, cap, det, cat, colr) in zip(ac, [
+        ("Solar PV array", f"{C.PV_CAPACITY_KW:.0f} kW", f"Peak available {disp.solar_avail.max():.1f} kW", "GENERATION", SOLAR),
+        ("Wind turbines", f"{C.WIND_CAPACITY_KW:.0f} kW", f"Peak available {disp.wind_avail.max():.1f} kW", "GENERATION", WINDC),
+        ("Battery storage", f"{C.BATTERY_CAPACITY_KWH:.0f} kWh", f"Window ends at {ops.ending_soc_pct:.0f}%", "STORAGE", BATT),
+        ("Diesel genset", f"{C.DIESEL_CAPACITY_KW:.0f} kW", f"Active {ops.diesel_active_hours} simulated hours", "BACKUP", DIESEL)]):
+        with col:
+            st.markdown(f"<div class='flow-card' style='--fc:{colr}'><div class='label'>{cat}</div><div class='value'>{cap}</div>"
+                        f"<div style='font-weight:650;margin-top:7px'>{name}</div><div class='foot'>{det}</div></div>", unsafe_allow_html=True)
+    bh = battery_health(disp)
+    section("Battery health", bh["assumption"])
+    kpis([("Estimated SOH", f"{bh['estimated_soh_pct']:.1f}%", "Linear cycle estimate"), ("Capacity now", f"{bh['estimated_capacity_kwh']:.0f} kWh", "Of nominal"),
+          ("Cycles this run", f"{bh['equivalent_full_cycles_this_run']:.2f}", "Equivalent full cycles"), ("Discharged", f"{bh['discharged_kwh']:,.0f} kWh", "In window"),
+          ("Charged", f"{bh['charged_kwh']:,.0f} kWh", "In window")])
+    section("Maintenance signals", "Threshold-based, explainable, simulated")
+    kind = {"HIGH": "bad", "WATCH": "warn", "OK": "good"}
+    table(["Priority", "Asset", "Signal", "Basis"], [[pill(s["priority"], kind.get(s["priority"], "mute")), s["asset"], s["signal"], s["basis"]] for s in maintenance_signals(disp, bh)])
+    section("Operations alert log", "Generated from the selected window, not real station alarms")
+    sev = {"success": "good", "info": "info", "warning": "warn", "notice": "bad"}
+    table(["Severity", "Code", "Title", "Detail"], [[pill(a["severity"], sev.get(a["severity"], "mute")), a["code"], a["title"], a["detail"]] for a in alerts])
+    section("Run history", "Newest 50 runs saved locally")
+    h1, h2, _ = st.columns([1.2, 1.2, 3])
+    if h1.button("Save this run", type="primary", use_container_width=True):
+        save_history_run(build_run_summary(disp, scenario, solver_status))
+    hist = load_history()
+    if hist:
+        table(["Saved (UTC)", "Scenario", "Hours", "Diesel", "Renewable", "Battery end", "SOH"],
+              [[str(r.get("saved_at_utc", ""))[:16].replace("T", " "), r.get("scenario", ""), r.get("hours", ""), f"{r.get('diesel_litres', 0):,.0f} L",
+                f"{r.get('renewable_share_pct', 0):.1f}%", f"{r.get('ending_soc_pct', 0):.0f}%", f"{r.get('battery_soh_pct', 0):.1f}%"] for r in reversed(hist)],
+              num_cols=(2, 3), max_h=320)
+    else:
+        st.markdown("<div class='stat-card'><div class='d'>No runs saved yet.</div></div>", unsafe_allow_html=True)
+    d1, d2, _ = st.columns([1.2, 1.2, 3])
+    d1.download_button("Report (Markdown)", export_report(ops, alerts, manifest), "polar_ems_report.md", "text/markdown", use_container_width=True)
+    d2.download_button("Manifest (JSON)", json.dumps(manifest, indent=2), "polar_ems_manifest.json", "application/json", use_container_width=True)
+
+else:  # Model Notes
+    banner("06 · Model Notes", "Transparency and diagnostics", "Runtime checks, configuration validation and modelling assumptions.", "System")
+    section("Runtime diagnostics")
+    table(["Component", "Status", "Detail"], [[d["component"], pill("Available" if d["available"] else "Missing", "good" if d["available"] else "bad"), d["detail"]] for d in runtime_diagnostics()])
+    section("Configuration validation")
+    table(["Check", "Result", "Rule"], [[d["check"], pill("Pass" if d["passed"] else "Fail", "good" if d["passed"] else "bad"), d["detail"]] for d in configuration_diagnostics()])
+    section("Installed capacity and parameters")
+    table(["Parameter", "Value"], [[a, b] for a, b in [
+        ("PV", f"{C.PV_CAPACITY_KW:.1f} kW"), ("Wind", f"{C.WIND_CAPACITY_KW:.1f} kW"), ("Diesel backup", f"{C.DIESEL_CAPACITY_KW:.1f} kW"),
+        ("Battery", f"{C.BATTERY_CAPACITY_KWH:.1f} kWh"), ("Minimum SOC", f"{C.BATTERY_MIN_SOC_FRAC * 100:.0f}%"), ("Initial SOC", f"{C.BATTERY_INIT_SOC_FRAC * 100:.0f}%"),
+        ("Latitude", f"{C.LATITUDE_DEG:.1f}°"), ("Diesel energy factor", f"{C.KWH_PER_LITRE_DIESEL:.2f} kWh/L"), ("Diesel CO₂ factor", f"{C.CO2_KG_PER_LITRE_DIESEL:.2f} kg/L")]])
+    section("Assumptions")
+    for e, t, d in [("Telemetry", "Seeded synthetic year", "Reproducible hourly data, not a live SCADA feed."),
+                    ("Solar geometry", "70°S", "Polar night and midnight sun emerge from the solar model."),
+                    ("Forecast", "Gradient-boosted regressor", "Calendar, temperature and lag features; final 30 days held out."),
+                    ("Dispatch", "PuLP/CBC LP", "Deterministic renewable-first fallback when the solver is unavailable."),
+                    ("Fuel baseline", "Renewables, no battery", "Remaining load by diesel; savings are measured against this.")]:
+        stat_card(e, t, d, TONE)
     with st.expander("Project pipeline"):
-        st.code("config.py → data_sim.py → forecast.py → optimizer.py → app.py", language="text")
-        st.caption("Synthetic data generation · ML forecast · fuel-minimising dispatch · operations dashboard")
+        st.markdown("<pre class='codebox'>config.py → data_sim.py → forecast.py → optimizer.py → ems_core.py / smart_ops.py → app.py</pre>", unsafe_allow_html=True)
 
-st.markdown(f"<div style='text-align:center;color:{MUTED};font-size:11px;padding-top:16px'>POLAR EMS · SIH 2026 · SIH26061 · SIMULATION ENVIRONMENT</div>", unsafe_allow_html=True)
+st.markdown("<div class='foot'>POLAR EMS · SIH 2026 · SIH26061 · SIMULATION ENVIRONMENT</div>", unsafe_allow_html=True)
