@@ -48,7 +48,20 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], [
 [data-testid="stVerticalBlock"] {{ color:{TEXT}; }}
 [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li {{ color:{TEXT}; }}
 [data-testid="stWidgetLabel"] p, label {{ color:{MUTED} !important; }}
-input, textarea, [data-baseweb="select"] > div, [data-baseweb="input"] > div {{ background:{PANEL}; color:{TEXT}; border-color:{BORDER} !important; }}
+input, textarea, [data-baseweb="input"] > div {{ background:{PANEL} !important; color:{TEXT} !important; border-color:{BORDER} !important; }}
+/* Streamlit/BaseWeb select controls: explicitly theme every nested surface. */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div,
+[data-baseweb="select"] > div {{ background:{PANEL} !important; color:{TEXT} !important; border-color:{BORDER} !important; box-shadow:none !important; }}
+[data-testid="stSelectbox"] [data-baseweb="select"] span,
+[data-testid="stMultiSelect"] [data-baseweb="select"] span,
+[data-baseweb="select"] span {{ color:{TEXT} !important; }}
+[data-baseweb="popover"] [role="listbox"], [data-baseweb="popover"] ul {{ background:{PANEL} !important; color:{TEXT} !important; }}
+[data-baseweb="popover"] [role="option"], [data-baseweb="popover"] li {{ color:{TEXT} !important; background:{PANEL} !important; }}
+[data-baseweb="popover"] [role="option"]:hover, [data-baseweb="popover"] li:hover {{ background:{PANEL_2} !important; }}
+/* Metric delta chips were inheriting the dark default theme in light mode. */
+[data-testid="stMetricDelta"] {{ background:{'#12352B' if dark_mode else '#E8F7F1'} !important; color:{'#8BE6BD' if dark_mode else '#087653'} !important; border-radius:999px; padding:2px 8px; width:fit-content; }}
+[data-testid="stMetricDelta"] *, [data-testid="stMetricDelta"] svg {{ color:{'#8BE6BD' if dark_mode else '#087653'} !important; fill:{'#8BE6BD' if dark_mode else '#087653'} !important; }}
 [data-testid="stSidebar"] [data-testid="stSidebarContent"] {{ background:{PANEL_2}; }}
 [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarExpandButton"] {{
   border:1px solid {BORDER} !important; border-radius:8px !important; background:{PANEL} !important;
